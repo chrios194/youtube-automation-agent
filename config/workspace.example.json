@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "workspaceId": "creator-pod-alpha",
+  "host": "127.0.0.1",
+  "accounts": [
+    {
+      "id": "creator-ai-ops",
+      "name": "AI Operations Creator",
+      "enabled": true,
+      "port": 3461,
+      "envFile": "runtime/creator-pod-alpha/creator-ai-ops/account.env",
+      "runtimeDir": "runtime/creator-pod-alpha/creator-ai-ops"
+    },
+    {
+      "id": "creator-quantum",
+      "name": "Quantum Explainer Creator",
+      "enabled": true,
+      "port": 3462,
+      "envFile": "runtime/creator-pod-alpha/creator-quantum/account.env",
+      "runtimeDir": "runtime/creator-pod-alpha/creator-quantum"
+    },
+    {
+      "id": "creator-small-biz",
+      "name": "Small Business AI Creator",
+      "enabled": false,
+      "port": 3463,
+      "envFile": "runtime/creator-pod-alpha/creator-small-biz/account.env",
+      "runtimeDir": "runtime/creator-pod-alpha/creator-small-biz"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenttube.local/contracts/commerce-boundary.v1.json",
+  "title": "AgentTube Commerce Boundary v1",
+  "description": "Defines non-PII offer and attribution data AgentTube may consume without becoming the system of record for customers, payments, refunds, or fulfillment.",
+  "type": "object",
+  "required": ["offerId", "creatorId", "status", "economics"],
+  "properties": {
+    "offerId": { "type": "string" },
+    "creatorId": { "type": "string" },
+    "status": { "enum": ["draft", "approved", "active", "paused", "retired"] },
+    "economics": {
+      "type": "object",
+      "properties": {
+        "currency": { "type": "string" },
+        "price": { "type": ["number", "null"] },
+        "attributedRevenue": { "type": ["number", "null"] },
+        "knownCost": { "type": ["number", "null"] }
+      }
+    },
+    "externalSystemRef": { "type": ["string", "null"] }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["customerEmail"] },
+      { "required": ["customerName"] },
+      { "required": ["paymentCard"] }
+    ]
+  }
+}

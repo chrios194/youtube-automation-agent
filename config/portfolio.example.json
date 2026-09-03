@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "portfolioId": "agenttube-global",
+  "rootDir": "runtime/portfolio/agenttube-global",
+  "limits": { "maxCreators": 100 },
+  "governance": {
+    "publicationDefault": "private",
+    "humanApprovalRequired": true,
+    "syntheticMediaDisclosureRequired": true,
+    "customerDataInCreatorRuntime": false,
+    "crossCreatorCredentialSharing": false
+  },
+  "objectives": {
+    "northStar": "durable creator-business contribution margin",
+    "optimizeFor": ["qualified_attention", "audience_trust", "retention", "revenue", "profit"],
+    "doNotOptimizeFor": ["raw_post_volume", "engagement_bait", "unverified_claims"]
+  },
+  "workspaces": [
+    {
+      "id": "creator-pod-alpha",
+      "vertical": "ai-business",
+      "enabled": true,
+      "manifest": "config/workspace.example.json"
+    }
+  ]
+}

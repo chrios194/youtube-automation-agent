@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenttube.local/contracts/platform-adapter.v1.json",
+  "title": "AgentTube Platform Adapter Contract v1",
+  "type": "object",
+  "required": ["platform", "capabilities", "disclosure", "rights"],
+  "properties": {
+    "platform": { "type": "string", "minLength": 2 },
+    "capabilities": {
+      "type": "object",
+      "required": ["publish", "schedule", "analytics", "comments"],
+      "properties": {
+        "publish": { "type": "boolean" },
+        "schedule": { "type": "boolean" },
+        "analytics": { "type": "boolean" },
+        "comments": { "type": "boolean" }
+      }
+    },
+    "disclosure": { "type": "object", "required": ["syntheticMediaSupported"] },
+    "rights": { "type": "object", "required": ["requiresAssetProvenance"] }
+  }
+}

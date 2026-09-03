@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "creatorId": "creator-ai-ops",
+  "publicIdentity": {
+    "displayName": "AI Operations Lab",
+    "bio": "Experiments and practical systems for applying AI to real work.",
+    "syntheticPersona": true,
+    "disclosure": "This channel uses AI-assisted writing, narration, and visuals. Human review governs factual claims and publication."
+  },
+  "audience": { "primary": "operators, builders, and business teams", "excluded": [] },
+  "editorial": {
+    "pointOfView": "test claims, show the workflow, publish evidence, explain tradeoffs",
+    "shows": [
+      { "id": "integrate-it", "promise": "How to integrate one useful system into a real business" },
+      { "id": "frontier-experiments", "promise": "Useful experiments that expand how people think about tools" },
+      { "id": "if-i-was", "promise": "Industry-specific operating priorities and implementation plans" },
+      { "id": "build-in-public", "promise": "From problem to working system, including failures and decisions" },
+      { "id": "signal-to-system", "promise": "Turn a new development into an actionable operating playbook" }
+    ],
+    "restrictedTopics": [],
+    "claimPolicy": "Evidence-backed; label estimates and unknowns; never fabricate use, results, customers, or partnerships."
+  },
+  "commerce": {
+    "allowedOfferTypes": ["software", "templates", "training", "services"],
+    "requiresHumanApprovalForPriceChanges": true,
+    "customerDataSystem": "external-approved-system"
+  },
+  "platforms": {
+    "youtube": { "enabled": true },
+    "tiktok": { "enabled": false },
+    "instagram": { "enabled": false }
+  }
+}

@@ -1,0 +1,476 @@
+{
+  "release": "AgentTube 3.0.0",
+  "generatedAt": "2026-09-03",
+  "files": [
+    {
+      "path": "env.example",
+      "sha256": "65a2dfdf0a1ca390cd8ffc04cf8df8103527cad0a40d4afa8006b365c63131be",
+      "bytes": 4293
+    },
+    {
+      "path": "github/ISSUE_TEMPLATE/bug_report.yml",
+      "sha256": "049f05224004e737eb8f586aacbfc07aebfffaa67ad2d25387b93c6d4d3cc699",
+      "bytes": 1780
+    },
+    {
+      "path": "github/ISSUE_TEMPLATE/config.yml",
+      "sha256": "53bdbd27f1ee85787792834aabf22975513275ec45725ec1380cc0a3de8fcbc8",
+      "bytes": 286
+    },
+    {
+      "path": "github/ISSUE_TEMPLATE/feature_request.yml",
+      "sha256": "ebec4c3180d1dd8c9acb36d2dcd02a7348ab1334bd5d1985e42bee75448e9d45",
+      "bytes": 696
+    },
+    {
+      "path": "github/PULL_REQUEST_TEMPLATE.md",
+      "sha256": "b4e29046f3af970920e309f76ec5322da14e8f8f8644b887cea840058072eda1",
+      "bytes": 481
+    },
+    {
+      "path": "github/workflows/ci.yml",
+      "sha256": "11cf38c70b0832fda010a2e3d55d8b411adb2f31d82052c6f95a0cfcd854bed2",
+      "bytes": 474
+    },
+    {
+      "path": "gitignore",
+      "sha256": "ac1f7af9427ac79cc1a0999d789d2102ab78b4ff93a3b4f6bfd58a527d46b648",
+      "bytes": 1018
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "66fc9086180273d6005c5269193b25eb41165ca4faef8a9a43c48fdfd685ae4e",
+      "bytes": 2593
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "ae94679f937e20c45b77f6f845ce67db77ffdc8367666a75e9d4faba09b4dc5c",
+      "bytes": 13261
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "f1b1ef253400e7e4d2db739231910c5b55ae0629ff59be31d3337d6b6ff3b391",
+      "bytes": 1899
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "0637d0e4accdfba32d1f8723892a882fe85057ea4860ec35bfcca578782e49a0",
+      "bytes": 1093
+    },
+    {
+      "path": "README.md",
+      "sha256": "af05fc89d7cba3a9932c80ceac0ca55737dc8f05a973a335f4059a1593cc8390",
+      "bytes": 37620
+    },
+    {
+      "path": "agents/analytics-optimization-agent.js",
+      "sha256": "2733ca673d4a305355b160a140867e102d4cf4aae2398be7a9295d4cd24fb1c9",
+      "bytes": 29454
+    },
+    {
+      "path": "agents/content-strategy-agent.js",
+      "sha256": "82e9766367ceca206ee8e6c9bd274773887824a1c5376cc176248662dda79c69",
+      "bytes": 28440
+    },
+    {
+      "path": "agents/production-management-agent.js",
+      "sha256": "b5fa9059fd4dde6841b071fe5e1ef270044e6936ecb7e8454b3d2bfe249a96f0",
+      "bytes": 24571
+    },
+    {
+      "path": "agents/publishing-scheduling-agent.js",
+      "sha256": "e4897d3a7aef861f39f94a67068031ec55db3ca7e36630925dff9126ed4a1235",
+      "bytes": 25445
+    },
+    {
+      "path": "agents/script-writer-agent.js",
+      "sha256": "e83cdaf58410a32dbbba7137a6115b38d0006b270149a3370ef45208861b1a1c",
+      "bytes": 26290
+    },
+    {
+      "path": "agents/seo-optimizer-agent.js",
+      "sha256": "4c5f4fe4827c5bd542a60ac46f65536e274c03097a1c67ce8d079ba9ffd634fe",
+      "bytes": 20850
+    },
+    {
+      "path": "agents/thumbnail-designer-agent.js",
+      "sha256": "1bccecab2809689e294fe560549c72f447982f7a47391715d99b23bf22de68a3",
+      "bytes": 11616
+    },
+    {
+      "path": "assets/demo/README.md",
+      "sha256": "a2c95bf0aaffb3081483a59b780c81414beb080160ccb9ae5f97bd349f6c6e94",
+      "bytes": 776
+    },
+    {
+      "path": "assets/youtube-automation-agent.jpg",
+      "sha256": "cffe348debe970d8a9248908b6e0b50b326d077f7aa8e9b5faf22154b449cbd4",
+      "bytes": 415453
+    },
+    {
+      "path": "config/credentials.example.json",
+      "sha256": "9089a6d37fbf09e0377fea880743be8a33fa0dc3d2490bf28b746e62f92be8ed",
+      "bytes": 1023
+    },
+    {
+      "path": "config/passports/creator-passport.example.json",
+      "sha256": "2f542233ca90b2efc0063704008afcef21e795619111016782add0fb703f3392",
+      "bytes": 1617
+    },
+    {
+      "path": "config/portfolio.example.json",
+      "sha256": "bb3eaf070eac217d8d8a8fbe5f8e07fef6f09eeca5cdd1c4221bf81ef1cddd6f",
+      "bytes": 812
+    },
+    {
+      "path": "config/workspace.example.json",
+      "sha256": "e185a6c2dae17529c4118d324bbd2f4c0a2e3d208e11361b8931c48cd97187e2",
+      "bytes": 904
+    },
+    {
+      "path": "contracts/commerce-boundary.v1.json",
+      "sha256": "43995735e34767558b93f2de3e8b81bc6008454822acbfe83f9f3642c6a4fa3e",
+      "bytes": 1112
+    },
+    {
+      "path": "contracts/platform-adapter.v1.json",
+      "sha256": "d5fbcf9f4eb6a6b37b4fdba153bf238b50f67c5b40c2f43c1a8a6e3a99ac1f5b",
+      "bytes": 832
+    },
+    {
+      "path": "dashboard/app.js",
+      "sha256": "73ae8db4fa0fa085c2db1973f472eee11fcf151260710060eeb34ef0d95a2ef4",
+      "bytes": 104061
+    },
+    {
+      "path": "dashboard/enhance.js",
+      "sha256": "8ed60dd638b91b64614767fea16b400e288d3d65a94653aada1691f3ba2e89c5",
+      "bytes": 17693
+    },
+    {
+      "path": "dashboard/index.html",
+      "sha256": "32d562cfb27f8d6d414e15105358143e7a3f832e0658fc669af086d069d69d5a",
+      "bytes": 29517
+    },
+    {
+      "path": "dashboard/styles.css",
+      "sha256": "7ec470b8bc3d7464240f414730c08343bd501d0e821d1f25697650118aaa3efd",
+      "bytes": 66201
+    },
+    {
+      "path": "database/db.js",
+      "sha256": "e7e50c6f894e735c5793e26fa8ea030289b79658f2e2971593555072ed28f8f9",
+      "bytes": 110190
+    },
+    {
+      "path": "docs/FINAL_RELEASE_AUDIT.md",
+      "sha256": "9664bfac1acaf3b8a77da5a51ad8cc633b43ed8ec7ade2ca598718a354ac5a82",
+      "bytes": 2924
+    },
+    {
+      "path": "docs/WORLD_RELEASE.md",
+      "sha256": "1c695b790c7b9461af05e825af2cda8caf93e264ca412343af68b2a911e66766",
+      "bytes": 3835
+    },
+    {
+      "path": "docs/multi-account-workspaces.md",
+      "sha256": "b25995e839add090e8115bac7be4b56f86e3d9238c606fc322ed0db031250dbc",
+      "bytes": 8079
+    },
+    {
+      "path": "docs/operations/GLOBAL_RUNBOOK.md",
+      "sha256": "39591fdc2684f86eaaece1ed29d19265e3081b96e9638e2a085f59386d75143a",
+      "bytes": 1351
+    },
+    {
+      "path": "docs/portfolio-extension-audit.md",
+      "sha256": "a43a551a4a4090b04f7d6a3ccf55a2bae750336a6a00e72e897a8d0aebe79e65",
+      "bytes": 18985
+    },
+    {
+      "path": "docs/release-readiness-multi-account-workspace.md",
+      "sha256": "d7e90c9703722da46412481544189b4f88279113bc9145cc43090d1cdca6154e",
+      "bytes": 22705
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-23-audience-engagement-studio.md",
+      "sha256": "57c831e51ddf9e918463f510f6ed3f01814bef8e369b90f08657d06a26903f18",
+      "bytes": 113908
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-23-audience-engagement-studio-design.md",
+      "sha256": "1779d478e88303dbfb56e3268ce1be3e1a2302a4c405cd4c5ba10e78c9d17db3",
+      "bytes": 17195
+    },
+    {
+      "path": "eslint.config.js",
+      "sha256": "8ed60899dbfdda208f8f81163547ffeb48a19f33c131a9ded640c1a3c9060921",
+      "bytes": 1485
+    },
+    {
+      "path": "examples/README.md",
+      "sha256": "8c644700103f520ef43be14bd5450cbd37c11deb4601024c76292534eb13a2ff",
+      "bytes": 678
+    },
+    {
+      "path": "index.js",
+      "sha256": "466ed1f6ec335bfde0b0e6e9730eeba1a2f3e6c78ac4dfa400116faef03f47ce",
+      "bytes": 87096
+    },
+    {
+      "path": "mcp/content-strategy-agent.mcp.json",
+      "sha256": "14a2a118140565ddd7f27b1c6f0b83e6c7490b2deaefd9a0ff68b57ddcabe922",
+      "bytes": 3699
+    },
+    {
+      "path": "modern-auth.js",
+      "sha256": "212c6766bef27497804a14dc3e6f4ed9cce5b8f69f9944040895733523d42409",
+      "bytes": 7854
+    },
+    {
+      "path": "oauth-server.js",
+      "sha256": "6916706090e5cca505f8c3264260a5ce6aa00c1f5f734cdcdbd4fb5bd9a6d336",
+      "bytes": 4743
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "4a44cb44001b4726ebd7b9fcba8f63df21a3ea19e771877fb9e17c5f12fd89ff",
+      "bytes": 228926
+    },
+    {
+      "path": "package.json",
+      "sha256": "2dc7f64da3892bc9ed1fb03b950f1d07bbcb2db0143b259f2e5581bd104721f8",
+      "bytes": 2495
+    },
+    {
+      "path": "portfolio/control-plane.js",
+      "sha256": "12762a5227750b58be484609ea4e1c21883c2d523914e73fb3029204e950d7c8",
+      "bytes": 4637
+    },
+    {
+      "path": "portfolio.js",
+      "sha256": "36e15c1068f8e4c08c5a3ba8cd3e176ead2f0ab83a5af2dd3bf3ce5636063412",
+      "bytes": 1677
+    },
+    {
+      "path": "reports/growth/baseline-2026-08-18.json",
+      "sha256": "9de6afbab0bed1f5dbae5ea9371e90e0df18befaeb1887b13480af6a39e0885c",
+      "bytes": 5933
+    },
+    {
+      "path": "reports/growth/baseline-2026-08-18.md",
+      "sha256": "17fd3738ecb1e2759fb0c4bec9164f440e09344b4423f205b3b0f14dfe6031b9",
+      "bytes": 1321
+    },
+    {
+      "path": "reports/growth/fork-census-2026-08-18.json",
+      "sha256": "449ea1b2fcf162f633226cde3a462c851c982124ca087b788c00e4cdd4bb76cd",
+      "bytes": 2390
+    },
+    {
+      "path": "reports/growth/fork-census-2026-08-18.md",
+      "sha256": "013008510fbcf1938924d349edfb814f234f89ef6f24ec1d2fff8e90ebfe4189",
+      "bytes": 1377
+    },
+    {
+      "path": "reports/growth/prelaunch-readiness-2026-08-18.md",
+      "sha256": "eb2ef6f2280a92fbb0b25b15cf0f5411d4dd11169cf200e84f92ad3ee66d012b",
+      "bytes": 1785
+    },
+    {
+      "path": "schedules/daily-automation.js",
+      "sha256": "22b105576a2fc24d58b5b8e16e56595f89d5e6f7f17515866964af405bcb9f00",
+      "bytes": 21734
+    },
+    {
+      "path": "scripts/backup-runtime.js",
+      "sha256": "9a7a25f503618f1a91fb156b3d91961767d965539fa4960c93e695a9723afd85",
+      "bytes": 2136
+    },
+    {
+      "path": "scripts/growth/snapshot-github.js",
+      "sha256": "927dd6f8bfd509738449df5a0066eb1e0777e0afe4fe6945f307ba92dd2b4682",
+      "bytes": 10371
+    },
+    {
+      "path": "scripts/verify-backup.js",
+      "sha256": "6dccd7857db9865e28461d6f9dcb59aee98c5d6ab4350baf0a4788676764a94c",
+      "bytes": 1028
+    },
+    {
+      "path": "setup.js",
+      "sha256": "b05c51e025573151646913c0fd794cbd4f0d13c3784397f269795ae7d26a87ec",
+      "bytes": 10420
+    },
+    {
+      "path": "test.js",
+      "sha256": "2b896dfe86b0bf7afbce818ff2296922654f5aa84aef8a33917e223378ed36a8",
+      "bytes": 160447
+    },
+    {
+      "path": "tests/fixtures/workspace/account.env",
+      "sha256": "7e95b7609f54bee88b5e40c4147efba6d831ba6e8f9bd7e845ed02aa85e0155f",
+      "bytes": 195
+    },
+    {
+      "path": "tests/fixtures/workspace/runtime/fixture-account/data/youtube_automation.db",
+      "sha256": "2202e509291a1b3427e9a3a065477ec16c5fb77e0ab7c90cb0651b553cc398d0",
+      "bytes": 389120
+    },
+    {
+      "path": "tests/fixtures/workspace/workspace-valid.json",
+      "sha256": "068c1ddb431e0d24a271f2941e56757b0993c960e05f47c2e44cce68a9310dcd",
+      "bytes": 342
+    },
+    {
+      "path": "tests/workspace-runtime.test.js",
+      "sha256": "96864923cbd67d405a11bc6e828f91167ab2d17ab372e283967dcef0b982d87b",
+      "bytes": 3080
+    },
+    {
+      "path": "tests/world-foundation.test.js",
+      "sha256": "5dca7462cf0a210d7eeb7dbe4adc13c3ff3e16799e25a1205a1774ac8da32dc1",
+      "bytes": 2142
+    },
+    {
+      "path": "utils/activation-metrics.js",
+      "sha256": "4f35e1665def7c4d5ed8ccce85543c09145715b9fcf6ecac8c0742c66f47076a",
+      "bytes": 3997
+    },
+    {
+      "path": "utils/ai-text-service.js",
+      "sha256": "257828f4b2f392aa41e87ac89a01dc80a8f67c8643b47f571d56bb8c1ecb82b7",
+      "bytes": 5691
+    },
+    {
+      "path": "utils/ai-video-generator.js",
+      "sha256": "99369e69231881fbd54291222a848ef440881aa4285aa4f06816917cee96f96a",
+      "bytes": 34493
+    },
+    {
+      "path": "utils/anonymous-telemetry.js",
+      "sha256": "dc3fcc5fa4a58e92999622b978c43adae52b349898f2b66bf4f0618d0e9920ae",
+      "bytes": 3686
+    },
+    {
+      "path": "utils/audience-engagement-service.js",
+      "sha256": "139a877ccef51e8760d5f85e98f392d9a360100b3a36410d1b0e66d9f78aaf24",
+      "bytes": 24527
+    },
+    {
+      "path": "utils/autonomous-channel-operator.js",
+      "sha256": "0c6ac8d9df5a3d1add73e0f21548ca5dc48adb5c08c3860777748b8e69178633",
+      "bytes": 9811
+    },
+    {
+      "path": "utils/channel-learning-engine.js",
+      "sha256": "c08a8e24e63e4a8be50c047c8ac92ef300f02bdc938aea75e5cc20c4e21f4024",
+      "bytes": 26032
+    },
+    {
+      "path": "utils/credential-manager.js",
+      "sha256": "344caf8222833497fbd936f10adec6d5f41267a9e0b438e19a16788793164c50",
+      "bytes": 22949
+    },
+    {
+      "path": "utils/discoverability-adapters/darkzseo.js",
+      "sha256": "217d584fa1d24453bb711b88e8fed86f5be8366b718c8c70cca2b4cd3f7f2f86",
+      "bytes": 4014
+    },
+    {
+      "path": "utils/discoverability-service.js",
+      "sha256": "40c30e57f2f7e635faccd55616d65323c421f17af0a5d815b87aea5bee195659",
+      "bytes": 4460
+    },
+    {
+      "path": "utils/ffmpeg.js",
+      "sha256": "591bce4cb675478763dc681d82c4fb20fd4772461d1aa5a9d1e64f78a7edf270",
+      "bytes": 1547
+    },
+    {
+      "path": "utils/generation-recovery-service.js",
+      "sha256": "cf404f53934c7c958a11433cd0059e9ba96cad4a9c92dfe357ab3bcb7f835664",
+      "bytes": 5307
+    },
+    {
+      "path": "utils/growth-experiment-service.js",
+      "sha256": "f3dc0d2509ddae528b534bd3caa5c7a0ded22664309281888170e4338d7fda2c",
+      "bytes": 21950
+    },
+    {
+      "path": "utils/logger.js",
+      "sha256": "f68d40ab963b0715d0a232bc622b9c35f5bc1df34ff76a1aa01ed7e3cb7b0f53",
+      "bytes": 4470
+    },
+    {
+      "path": "utils/media-generation-service.js",
+      "sha256": "e2afa507199f2aa3b26385b912d6e053bbd8266a2124ad3ea9217b3e9d128117",
+      "bytes": 10550
+    },
+    {
+      "path": "utils/operator-service.js",
+      "sha256": "c8dba8e7f92f1f1617b72e4347b8f4a542b7f12c20cdea4f86d2653fce07172a",
+      "bytes": 8340
+    },
+    {
+      "path": "utils/platform-capabilities.js",
+      "sha256": "721be9fd25f5c1da6eebe0f26cf72bf5bbc309d792a7fa2d44d90b9eb98a098d",
+      "bytes": 1226
+    },
+    {
+      "path": "utils/production-readiness-service.js",
+      "sha256": "ba5bfa2b80f35de9166cc433316047a64d35c85246448fc14f5ce20d6b4c2a50",
+      "bytes": 14260
+    },
+    {
+      "path": "utils/provenance-service.js",
+      "sha256": "21a6652db2fc0b73520d84c7fec3da453345476c8eb0c46e33f093fb582e7c38",
+      "bytes": 6049
+    },
+    {
+      "path": "utils/scene-repair-service.js",
+      "sha256": "694cabac03d25e3d8eb330d613461cf72d2b6e3acb5313007450f23e876baf7a",
+      "bytes": 37167
+    },
+    {
+      "path": "utils/scene-retention-engine.js",
+      "sha256": "aa072ffd4bbe61d5c7b6c63f5649ca3da58d630e171a3e61518f93447f0e8d2e",
+      "bytes": 10899
+    },
+    {
+      "path": "utils/secret-store.js",
+      "sha256": "ea4c5714d37e5b5b784f5de138214e03fa2c88c329402c6ba9ba83d5ea8934ad",
+      "bytes": 2342
+    },
+    {
+      "path": "utils/shorts-repurposing-service.js",
+      "sha256": "8295900e443cd89b934378429d0366081627fdc5b46365166e8da3513711f6e2",
+      "bytes": 17161
+    },
+    {
+      "path": "utils/video-providers.js",
+      "sha256": "d6c5f955e3073c86ad3b055e33d5a776f2f4eabfb81191afc8d8948d48a1550e",
+      "bytes": 21179
+    },
+    {
+      "path": "utils/workspace-runtime.js",
+      "sha256": "323eb775339d12dd0c35a6be36af8cfea85c554e38a1d6379988b7f82eeccb1e",
+      "bytes": 2439
+    },
+    {
+      "path": "utils/youtube-metadata-validator.js",
+      "sha256": "d42ddaaf8498a656f889e77cd6380c0be52ca9d385c19908428f87d65851ef66",
+      "bytes": 3167
+    },
+    {
+      "path": "walkthrough.js",
+      "sha256": "6bccd5d83aaa232017efffb4a8bced8b69ddf8c832f193c00610d734645ec95d",
+      "bytes": 24052
+    },
+    {
+      "path": "workspace.js",
+      "sha256": "14ce6a01e5700f2c92ed1e2223d6090130a3c838669580f91078e252fc1d2341",
+      "bytes": 9432
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "workspaceId": "fixture-pod",
+  "host": "127.0.0.1",
+  "accounts": [
+    {
+      "id": "fixture-account",
+      "name": "Fixture Account",
+      "enabled": true,
+      "port": 4567,
+      "envFile": "tests/fixtures/workspace/account.env",
+      "runtimeDir": "tests/fixtures/workspace/runtime/fixture-account"
+    }
+  ]
+}
