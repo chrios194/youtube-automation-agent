@@ -245,7 +245,8 @@ class YouTubeAutomationAgent {
       topic: null,
       style: null,
       length: typeof body.length === 'string' ? body.length.toLowerCase() : 'medium',
-      strategyContext: null
+      strategyContext: null,
+      approvalRequired: body.approval_required !== false
     };
 
     // JSON has no `undefined`, so clients send `null` to mean "no value provided".
@@ -291,6 +292,10 @@ class YouTubeAutomationAgent {
 
     if (!['short', 'medium', 'long'].includes(value.length)) {
       return { valid: false, status: 400, error: 'length must be short, medium, or long' };
+    }
+
+    if (body.approval_required !== undefined && typeof body.approval_required !== 'boolean') {
+      return { valid: false, status: 400, error: 'approval_required must be a boolean' };
     }
 
     if (body.strategyContext !== undefined && body.strategyContext !== null) {
@@ -432,8 +437,8 @@ class YouTubeAutomationAgent {
           return res.status(validation.status).json({ success: false, error: validation.error });
         }
 
-        const { topic, style, length } = validation.value;
-        const result = await this.startGenerationJob({ topic, style, length, source: 'manual' });
+        const { topic, style, length, strategyContext, approvalRequired } = validation.value;
+        const result = await this.startGenerationJob({ topic, style, length, strategyContext, approval_required: approvalRequired, source: 'manual' });
         res.status(202).json({ success: true, result });
       } catch (error) {
         res.status(error.status || 500).json({ success: false, error: error.message });
@@ -1279,7 +1284,8 @@ class YouTubeAutomationAgent {
 
     const job = await this.db.createGenerationJob({
       ...validation.value,
-      source: input.source || 'manual'
+      source: input.source || 'manual',
+      approval_required: validation.value.approvalRequired
     });
 
     const work = this.runGenerationJob(job.id, validation.value)
@@ -1384,7 +1390,8 @@ class YouTubeAutomationAgent {
       await this.db.updateGenerationJob(jobId, { status: 'running', progress: 2, error: null, completedAt: null });
       const result = await this.generateContent(input.topic, input.style, input.length, {
         jobId,
-        strategyContext: input.strategyContext
+        strategyContext: input.strategyContext,
+        approvalRequired: input.approval_required
       });
       await this.db.updateGenerationJob(jobId, {
         status: 'completed',
@@ -1432,7 +1439,7 @@ class YouTubeAutomationAgent {
 
   async generateContent(topic = null, style = null, length = 'medium', options = {}) {
     this.logger.info('Starting content generation pipeline...');
-    const { jobId = null, strategyContext = {} } = options;
+    const { jobId = null, strategyContext = {}, approvalRequired } = options;
     const profile = await this.db.getChannelProfile() || {};
     const lengthLabels = { short: '2-4 minutes', medium: '8-12 minutes', long: '15-20 minutes' };
 
@@ -1511,13 +1518,15 @@ class YouTubeAutomationAgent {
 
     // Step 6: Quality and approval gate
     return this.runGenerationStage(jobId, 'quality_review', 90, async () => {
-      const approvalRequired = await this.db.getSetting('approval_required') !== 'false';
-      const packagingExperiment = approvalRequired
+      const requiresReview = approvalRequired !== undefined
+        ? approvalRequired === true
+        : await this.db.getSetting('approval_required') !== 'false';
+      const packagingExperiment = requiresReview
         ? await this.preparePackagingExperiment(thumbnail, productionData, seoData, script)
         : null;
       const quality = await this.operator.runQualityChecks(productionData, profile);
       const reviewStatus = quality.passed
-        ? (approvalRequired ? 'needs_review' : 'approved')
+        ? (requiresReview ? 'needs_review' : 'approved')
         : 'needs_attention';
       await this.db.saveContentReview(contentId, {
         status: reviewStatus,
@@ -1528,7 +1537,7 @@ class YouTubeAutomationAgent {
           selectedThumbnailVariant: 0
         } : {},
         reviewNotes: quality.passed ? null : `Blocking checks failed: ${quality.blockingFailures.join(', ')}`,
-        reviewedAt: approvalRequired ? null : new Date().toISOString()
+        reviewedAt: requiresReview ? null : new Date().toISOString()
       });
 
       let scheduleEntry = null;
