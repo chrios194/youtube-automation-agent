@@ -1282,13 +1282,16 @@ class YouTubeAutomationAgent {
       throw error;
     }
 
+    const source = input.source || 'manual';
+    const approvalRequired = source === 'aios' ? true : validation.value.approvalRequired;
     const job = await this.db.createGenerationJob({
       ...validation.value,
-      source: input.source || 'manual',
-      approval_required: validation.value.approvalRequired
+      source,
+      approval_required: approvalRequired
     });
 
-    const work = this.runGenerationJob(job.id, validation.value)
+    const generationInput = { ...validation.value, approval_required: approvalRequired };
+    const work = this.runGenerationJob(job.id, generationInput)
       .catch(error => this.logger.error(`Generation job ${job.id} failed:`, error))
       .finally(() => this.activeJobs.delete(job.id));
     this.activeJobs.set(job.id, work);
