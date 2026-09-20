@@ -438,7 +438,16 @@ class YouTubeAutomationAgent {
         }
 
         const { topic, style, length, strategyContext, approvalRequired } = validation.value;
-        const result = await this.startGenerationJob({ topic, style, length, strategyContext, approval_required: approvalRequired, source: 'manual' });
+        const source = req.body?.source === 'aios' ? 'aios' : 'manual';
+        const effectiveApprovalRequired = source === 'aios' ? true : approvalRequired;
+        const result = await this.startGenerationJob({
+          topic,
+          style,
+          length,
+          strategyContext,
+          approval_required: effectiveApprovalRequired,
+          source
+        });
         res.status(202).json({ success: true, result });
       } catch (error) {
         res.status(error.status || 500).json({ success: false, error: error.message });
