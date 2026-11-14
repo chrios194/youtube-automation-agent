@@ -1,9 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
+const fs = require('fs');
 const { execFileSync } = require('child_process');
 
 const { assertWorkspaceAccountId, getWorkspaceRuntime } = require('../utils/workspace-runtime');
+const { validateManifest, buildAccountEnvironment } = require('../workspace');
 
 const originalEnvironment = { ...process.env };
 
@@ -21,6 +23,38 @@ function resetEnvironment() {
 }
 
 test.afterEach(() => resetEnvironment());
+
+function createTwoAccountFixture({ duplicateApiKey = false, duplicateMasterKey = false } = {}) {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'isolation-'));
+  const relativeDir = path.relative(path.join(__dirname, '..'), fixtureDir).split(path.sep).join('/');
+  const keys = {
+    apiA: 'account-a-api-key-12345678901234567890',
+    apiB: duplicateApiKey ? 'account-a-api-key-12345678901234567890' : 'account-b-api-key-12345678901234567890',
+    masterA: 'account-a-master-key-123456789012345678901234567890',
+    masterB: duplicateMasterKey ? 'account-a-master-key-123456789012345678901234567890' : 'account-b-master-key-123456789012345678901234567890'
+  };
+  fs.writeFileSync(path.join(fixtureDir, 'account-a.env'), [
+    `API_KEY=${keys.apiA}`,
+    `AGENTTUBE_MASTER_KEY=${keys.masterA}`,
+    'OPENAI_API_KEY=account-a-openai-secret'
+  ].join('\n') + '\n');
+  fs.writeFileSync(path.join(fixtureDir, 'account-b.env'), [
+    `API_KEY=${keys.apiB}`,
+    `AGENTTUBE_MASTER_KEY=${keys.masterB}`,
+    'OPENAI_API_KEY=account-b-openai-secret'
+  ].join('\n') + '\n');
+  const manifestPath = path.join(fixtureDir, 'workspace.json');
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    version: 1,
+    workspaceId: 'fixture-isolation',
+    accounts: [
+      { id: 'account-a', port: 4201, envFile: `${relativeDir}/account-a.env` },
+      { id: 'account-b', port: 4202, envFile: `${relativeDir}/account-b.env` }
+    ]
+  }, null, 2));
+  return { fixtureDir, manifestPath };
+}
+
 
 test('accepts safe workspace account identifiers', () => {
   assert.equal(assertWorkspaceAccountId('creator-ai-ops'), 'creator-ai-ops');
@@ -68,4 +102,54 @@ test('rejects account data paths that escape the account runtime', () => {
   process.env.WORKSPACE_DATA_DIR = path.join(process.cwd(), 'runtime', 'other-account', 'data');
 
   assert.throws(() => getWorkspaceRuntime(), /must remain inside/);
+});
+
+
+test('workspace child environments inherit only safe OS variables and each account own secrets', async () => {
+  const fixture = createTwoAccountFixture();
+  const previousOpenAI = process.env.OPENAI_API_KEY;
+  const previousGemini = process.env.GEMINI_API_KEY;
+  const previousYoutube = process.env.YOUTUBE_API_KEY;
+  try {
+    process.env.OPENAI_API_KEY = 'parent-openai-secret';
+    process.env.GEMINI_API_KEY = 'parent-gemini-secret';
+    process.env.YOUTUBE_API_KEY = 'parent-youtube-secret';
+    const config = await validateManifest(fixture.manifestPath);
+    const accountA = await buildAccountEnvironment(config, config.accounts[0]);
+    const accountB = await buildAccountEnvironment(config, config.accounts[1]);
+    assert.equal(accountA.OPENAI_API_KEY, 'account-a-openai-secret');
+    assert.equal(accountB.OPENAI_API_KEY, 'account-b-openai-secret');
+    assert.equal(accountA.GEMINI_API_KEY, undefined);
+    assert.equal(accountB.GEMINI_API_KEY, undefined);
+    assert.equal(accountA.YOUTUBE_API_KEY, undefined);
+    assert.equal(accountB.YOUTUBE_API_KEY, undefined);
+    assert.notEqual(accountA.API_KEY, accountB.API_KEY);
+    assert.notEqual(accountA.AGENTTUBE_MASTER_KEY, accountB.AGENTTUBE_MASTER_KEY);
+    assert.equal(accountA.WORKSPACE_ACCOUNT_ID, 'account-a');
+    assert.equal(accountB.WORKSPACE_ACCOUNT_ID, 'account-b');
+    assert.ok(accountA.PATH);
+  } finally {
+    if (previousOpenAI === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousOpenAI;
+    if (previousGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = previousGemini;
+    if (previousYoutube === undefined) delete process.env.YOUTUBE_API_KEY; else process.env.YOUTUBE_API_KEY = previousYoutube;
+    fs.rmSync(fixture.fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('workspace rejects reused API keys across accounts', async () => {
+  const fixture = createTwoAccountFixture({ duplicateApiKey: true });
+  try {
+    await assert.rejects(() => validateManifest(fixture.manifestPath), /reuses another account's API_KEY/);
+  } finally {
+    fs.rmSync(fixture.fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('workspace rejects reused master encryption keys across accounts', async () => {
+  const fixture = createTwoAccountFixture({ duplicateMasterKey: true });
+  try {
+    await assert.rejects(() => validateManifest(fixture.manifestPath), /reuses another account's AGENTTUBE_MASTER_KEY/);
+  } finally {
+    fs.rmSync(fixture.fixtureDir, { recursive: true, force: true });
+  }
 });
