@@ -62,6 +62,6 @@ The draft remediation restricts inherited variables to a safe OS/runtime allowli
 
 ## 6. CI and release state
 
-The repository's default branch is `main`, but its CI workflow was configured only for `master`. The draft remediation enables CI for pull requests and pushes to both `main` and `master`.
+The repository's default branch is `main`, but its CI workflow was configured only for `master`. The workflow on `main` now triggers for pushes and pull requests targeting both `main` and `master`, and supports manual dispatch. The draft branch carries the same workflow correction; CI results must be verified before merge.
 
 No API Project was created, no OAuth client ID/secret or user token was entered, and no YouTube upload, schedule, comment, or other write action was performed. The default compliance configuration remains blocked until the boundary review, child-directed assessment, required compliance audit/approval, exclusive project mapping, and credential authorization are documented.
