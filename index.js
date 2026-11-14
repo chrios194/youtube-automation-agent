@@ -1628,9 +1628,13 @@ class YouTubeAutomationAgent {
       if (!['private', 'unlisted', 'public'].includes(input.privacyStatus)) throw new Error('Invalid privacy status');
       output.privacyStatus = input.privacyStatus;
     }
-    if (input.selfDeclaredMadeForKids !== undefined && input.selfDeclaredMadeForKids !== null) {
-      if (typeof input.selfDeclaredMadeForKids !== 'boolean') throw new Error('Made for Kids declaration must be an explicit boolean');
-      output.selfDeclaredMadeForKids = input.selfDeclaredMadeForKids;
+    if (input.selfDeclaredMadeForKids !== undefined) {
+      if (input.selfDeclaredMadeForKids === null) {
+        delete output.selfDeclaredMadeForKids;
+      } else {
+        if (typeof input.selfDeclaredMadeForKids !== 'boolean') throw new Error('Made for Kids declaration must be an explicit boolean');
+        output.selfDeclaredMadeForKids = input.selfDeclaredMadeForKids;
+      }
     }
     if (input.factChecked !== undefined) output.factChecked = input.factChecked === true;
     if (input.rightsConfirmed !== undefined) output.rightsConfirmed = input.rightsConfirmed === true;
