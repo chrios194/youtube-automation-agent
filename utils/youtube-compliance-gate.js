@@ -36,7 +36,8 @@ function getYouTubeComplianceState(config) {
 
   if (current.schemaVersion !== 1) blockers.push('compliance configuration schema version must equal 1');
   if (typeof client.id !== 'string' || !client.id.trim()) blockers.push('actual API Client identity is missing');
-  if (boundary.status !== 'approved') blockers.push('actual API Client boundary review is not approved');
+  if (client.boundaryStatus !== 'approved' || boundary.status !== 'approved') blockers.push('actual API Client boundary review is not approved');
+  if (!Array.isArray(boundary.evidenceRefs) || boundary.evidenceRefs.length === 0) blockers.push('actual API Client boundary evidence is missing');
   if (!['yes', 'no'].includes(child.status)) blockers.push('child-directed status has not been assessed as yes or no');
   if (child.status === 'yes') blockers.push('child-directed API Clients cannot use this publishing client for YouTube write actions');
   if (!['approved', 'not_required'].includes(audit.status) || typeof audit.evidenceRef !== 'string' || !audit.evidenceRef.trim()) {
@@ -62,7 +63,7 @@ function getYouTubeComplianceState(config) {
   if (controls.quotaShardingAllowed !== false) blockers.push('quota sharding or project multiplication is not explicitly prohibited');
   if (controls.perChannelProjectCreationAllowed !== false) blockers.push('per-channel API Project creation is not explicitly prohibited');
   if (controls.madeForKidsDeclarationRequiredPerVideo !== true) blockers.push('per-video Made for Kids declaration is not required');
-  if (namespaces.perAccountIsolated !== true || namespaces.crossAccountTokenReuseAllowed !== false || namespaces.apiProjectCountIndependent !== true) {
+  if (typeof namespaces.pattern !== 'string' || !namespaces.pattern.includes('<accountId>') || namespaces.perAccountIsolated !== true || namespaces.crossAccountTokenReuseAllowed !== false || namespaces.apiProjectCountIndependent !== true) {
     blockers.push('per-account OAuth token isolation is not documented independently of API Project count');
   }
   if (child.status === 'no' && (!Array.isArray(child.evidenceRefs) || child.evidenceRefs.length === 0)) {
