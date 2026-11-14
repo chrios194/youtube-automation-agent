@@ -156,6 +156,10 @@ class ShortsRepurposingService {
       if (!['private', 'unlisted', 'public'].includes(input.privacyStatus)) throw new Error('Short privacy is invalid');
       changes.privacyStatus = input.privacyStatus;
     }
+    if (input.selfDeclaredMadeForKids !== undefined && input.selfDeclaredMadeForKids !== null) {
+      if (typeof input.selfDeclaredMadeForKids !== 'boolean') throw new Error('Short Made for Kids declaration must be an explicit boolean');
+      changes.selfDeclaredMadeForKids = input.selfDeclaredMadeForKids;
+    }
     if (clip.status === 'rendered' && Object.keys(changes).some(key => ['layout'].includes(key))) {
       changes.status = 'proposed';
       changes.outputPath = null;
@@ -274,6 +278,15 @@ class ShortsRepurposingService {
     if (Number.isNaN(publishTime.getTime())) throw new Error('Choose a valid Short publish time');
     const privacyStatus = input.privacyStatus || clip.privacyStatus || 'private';
     if (!['private', 'unlisted', 'public'].includes(privacyStatus)) throw new Error('Short privacy is invalid');
+    const selfDeclaredMadeForKids = input.selfDeclaredMadeForKids !== undefined && input.selfDeclaredMadeForKids !== null
+      ? input.selfDeclaredMadeForKids
+      : clip.selfDeclaredMadeForKids;
+    if (typeof selfDeclaredMadeForKids !== 'boolean') {
+      const error = new Error('Select whether this individual Short is Made for Kids before approval');
+      error.status = 409;
+      error.code = 'MADE_FOR_KIDS_DECLARATION_REQUIRED';
+      throw error;
+    }
     const parentUrl = bundle.schedule?.youtube_url || bundle.schedule?.youtubeUrl;
     const description = parentUrl && !clip.description.includes(parentUrl)
       ? `${clip.description}\n\nWatch the full video: ${parentUrl}`.slice(0, 5000)
@@ -296,6 +309,7 @@ class ShortsRepurposingService {
       scheduledPublishTime: publishTime.toISOString(),
       priority: 60,
       privacyStatus,
+      selfDeclaredMadeForKids,
       containsSyntheticMedia: evidence.containsSyntheticMedia,
       contentType: 'short',
       sourceProductionId: productionId,
@@ -307,7 +321,7 @@ class ShortsRepurposingService {
       throw error;
     }
     return this.db.updateShortClip(clip.id, {
-      status: 'scheduled', publishTime: publishTime.toISOString(), privacyStatus,
+      status: 'scheduled', publishTime: publishTime.toISOString(), privacyStatus, selfDeclaredMadeForKids,
       inheritedEvidence: evidence, approvedAt: new Date().toISOString(), scheduleId: schedule.id,
       error: null
     });
