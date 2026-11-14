@@ -118,3 +118,11 @@ The launcher does not provide cross-account queue balancing, pooled model budget
 ## Transition to the portfolio control plane
 
 A later centralized portfolio layer should consume account-level exports or approved read-only API events. It should not directly merge all account databases, credentials, customer data, or approval keys. The migration threshold is reached when shared portfolio analytics, cross-creator experiments, commerce attribution, multi-user roles, or worker orchestration require capabilities that a bounded independent workspace cannot provide safely.
+
+## YouTube API Client boundary
+
+All workspace accounts launched from this AgentTube codebase are account instances of the same software product, not separate YouTube API Clients merely because they use different channels, account IDs, ports, databases, or runtime directories. If AgentTube is approved to use YouTube API credentials, the product uses exactly one API Project exclusive to AgentTube. Do not create per-channel/per-account projects or multiply projects to obtain more quota.
+
+Each account keeps its own `config/credentials.json` and `config/tokens.json` inside its unique runtime/config directory. User authorization tokens must never be reused across accounts. The number of account-local token namespaces is independent of the API Project count.
+
+The YouTube API Client compliance gate in `config/youtube-api-client-compliance.json` blocks OAuth setup and publishing until the product boundary, child-directed assessment, required compliance audit/approval, and one-project mapping are documented. The current state is blocked. Do not create an API Project or credentials while blocked.
