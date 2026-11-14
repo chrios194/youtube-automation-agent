@@ -5,6 +5,11 @@ const { AudienceEngagementService } = require('./utils/audience-engagement-servi
 const { DailyAutomation } = require('./schedules/daily-automation');
 const chalk = require('chalk');
 const path = require('path');
+
+const ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS = {
+  getYouTubeComplianceState: () => ({ allowed: true, blockers: [] }),
+  assertYouTubeComplianceGate: () => ({ allowed: true, config: { apiProject: { oauthClientId: 'test-client' } } })
+};
 const { ProductionReadinessService } = require('./utils/production-readiness-service');
 const { normalizeTags, validateYouTubeMetadata } = require('./utils/youtube-metadata-validator');
 
@@ -1520,7 +1525,7 @@ class SystemTest {
         { id: 'short-source-3', label: 'Result', scriptText: 'Render locally and review every Short before it reaches the schedule.', prompt: 'Result', duration: 1.3, assetType: 'video', assetPath: sourceVideo, audioPath, status: 'ready', narrationStatus: 'current', rightsConfirmed: true }
       ]);
 
-      const publishing = new PublishingSchedulingAgent(db, {});
+      const publishing = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       const service = new ShortsRepurposingService(db, publishing, {
         dataRoot: path.join(directory, 'shorts'), width: 360, height: 640, logger: this.logger
       });
@@ -1530,7 +1535,7 @@ class SystemTest {
       }
       const edited = await service.update(productionId, proposed[0].id, {
         title: 'One approved video, three vertical moments', layout: 'blur',
-        tags: ['Shorts', 'repurposing', 'workflow']
+        tags: ['Shorts', 'repurposing', 'workflow'], selfDeclaredMadeForKids: false
       });
       if (edited.title.length > 100 || edited.layout !== 'blur') throw new Error('Short draft edits did not persist');
       const rendered = await service.render(productionId, edited.id);
@@ -1546,8 +1551,16 @@ class SystemTest {
         approvalBlocked = error.code === 'SHORT_APPROVAL_REQUIRED';
       }
       if (!approvalBlocked) throw new Error('Short scheduling bypassed explicit approval confirmation');
+      let madeForKidsBlocked = false;
+      try {
+        await service.approve(productionId, rendered.id, { confirmed: true, privacyStatus: 'private' });
+      } catch (error) {
+        madeForKidsBlocked = error.code === 'MADE_FOR_KIDS_DECLARATION_REQUIRED';
+      }
+      if (!madeForKidsBlocked) throw new Error('Short approval did not require an explicit Made for Kids declaration');
       const scheduled = await service.approve(productionId, rendered.id, {
-        confirmed: true, publishTime: new Date(Date.now() + 172800000).toISOString(), privacyStatus: 'private'
+        confirmed: true, publishTime: new Date(Date.now() + 172800000).toISOString(), privacyStatus: 'private',
+        selfDeclaredMadeForKids: false
       });
       const schedule = await db.getLatestScheduleEntry(rendered.id);
       if (
@@ -1684,6 +1697,7 @@ class SystemTest {
           seo: production.seo,
           video: { path: videoPath },
           privacyStatus: 'private',
+          selfDeclaredMadeForKids: false,
           containsSyntheticMedia: true
         }
       });
@@ -2085,8 +2099,8 @@ class SystemTest {
     }, {});
 
     agent.publishQueue = [
-      { productionId: 'prod-a', title: 'A', status: 'scheduled', metadata: { audio: intentionalAudio } },
-      { productionId: 'prod-b', title: 'B', status: 'scheduled', metadata: { audio: intentionalAudio } }
+      { productionId: 'prod-a', title: 'A', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } },
+      { productionId: 'prod-b', title: 'B', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } }
     ];
     agent.uploadToYouTube = async () => ({ id: 'youtube-1' });
 
@@ -2096,8 +2110,8 @@ class SystemTest {
       throw new Error('publishContent removed the wrong publish queue entries');
     }
 
-    const missingNarration = new PublishingSchedulingAgent({ updateScheduleEntry: async () => {} }, {});
-    missingNarration.publishQueue = [{ productionId: 'prod-no-audio', status: 'scheduled', metadata: {} }];
+    const missingNarration = new PublishingSchedulingAgent({ updateScheduleEntry: async () => {} }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
+    missingNarration.publishQueue = [{ productionId: 'prod-no-audio', status: 'scheduled', metadata: { selfDeclaredMadeForKids: false } }];
     missingNarration.uploadToYouTube = async () => { throw new Error('Upload must not start without narration'); };
     let narrationPublishBlocked = false;
     try {
@@ -2123,7 +2137,7 @@ class SystemTest {
       updateScheduleEntry: async entry => uncertainUpdates.push({ ...entry })
     }, {});
     uncertain.publishQueue = [
-      { id: 'schedule-uncertain', productionId: 'prod-uncertain', title: 'Uncertain', status: 'scheduled', metadata: { audio: intentionalAudio } }
+      { id: 'schedule-uncertain', productionId: 'prod-uncertain', title: 'Uncertain', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } }
     ];
     let uploadAttempts = 0;
     uncertain.uploadToYouTube = async entry => {
@@ -2151,7 +2165,7 @@ class SystemTest {
     let reconciliationCalls = 0;
     const recorded = {
       id: 'schedule-recorded', productionId: 'prod-recorded', title: 'Recorded', status: 'uploaded',
-      youtubeId: 'youtube-existing', metadata: { audio: intentionalAudio }
+      youtubeId: 'youtube-existing', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false }
     };
     const reconcile = new PublishingSchedulingAgent({
       getLatestScheduleEntry: async () => recorded,
@@ -2206,9 +2220,18 @@ class SystemTest {
       }
 
       manager.credentials = { openai: { apiKey: 'sk-test' } };
-      const missingYouTube = manager.getMissingCredentials();
+      const youtubeOptionalWhileBlocked = manager.getMissingCredentials();
+      if (youtubeOptionalWhileBlocked.length !== 0) {
+        throw new Error('YouTube credentials were required while the compliance gate is closed');
+      }
+      const gateOpenManager = new CredentialManager({
+        getYouTubeComplianceState: () => ({ allowed: true, blockers: [] }),
+        assertYouTubeComplianceGate: () => ({ allowed: true, config: { apiProject: { oauthClientId: 'approved-client' } } })
+      });
+      gateOpenManager.credentials = { openai: { apiKey: 'sk-test' } };
+      const missingYouTube = gateOpenManager.getMissingCredentials();
       if (missingYouTube.length !== 1 || missingYouTube[0] !== 'youtube') {
-        throw new Error('Missing YouTube credentials were not detected');
+        throw new Error('Missing YouTube credentials were not detected after the compliance gate was approved');
       }
     } finally {
       for (const key of envKeys) {
@@ -2335,7 +2358,7 @@ class SystemTest {
     const missingNarration = await agent.scheduleContent({
       id: 'prod-no-narration', script: { title: 'No narration' }, priority: 50,
       scheduledPublishTime: new Date().toISOString(),
-      assets: { finalVideo: { path: 'video.mp4' } }, seo: {}
+      assets: { finalVideo: { path: 'video.mp4' } }, seo: {}, selfDeclaredMadeForKids: false
     });
     if (missingNarration !== null) throw new Error('Production without narration was scheduled for publishing');
 
@@ -2352,7 +2375,8 @@ class SystemTest {
           silenceConfirmedAt: new Date().toISOString()
         }
       },
-      seo: {}
+      seo: {},
+      selfDeclaredMadeForKids: false
     });
     if (!real || agent.publishQueue.length !== 1) {
       throw new Error('Real production was not scheduled for publishing');
