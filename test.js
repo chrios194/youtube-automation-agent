@@ -1650,7 +1650,7 @@ class SystemTest {
         throw new Error('Generated research sources and claims were not initialized as unresolved provenance');
       }
 
-      const publishGuard = new PublishingSchedulingAgent(db, {});
+      const publishGuard = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       publishGuard.publishQueue = [{ productionId, status: 'scheduled', metadata: {} }];
       let blockedPublishRejected = false;
       try {
@@ -1687,7 +1687,7 @@ class SystemTest {
       }
 
       let uploadRequest;
-      const publishing = new PublishingSchedulingAgent(db, {});
+      const publishing = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       publishing.youtube = {
         videos: { insert: async request => { uploadRequest = request; return { data: { id: 'provenance-video' } }; } }
       };
@@ -2096,7 +2096,7 @@ class SystemTest {
     };
     const agent = new PublishingSchedulingAgent({
       updateScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
     agent.publishQueue = [
       { productionId: 'prod-a', title: 'A', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } },
@@ -2135,7 +2135,7 @@ class SystemTest {
     let uncertainUpdates = [];
     const uncertain = new PublishingSchedulingAgent({
       updateScheduleEntry: async entry => uncertainUpdates.push({ ...entry })
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
     uncertain.publishQueue = [
       { id: 'schedule-uncertain', productionId: 'prod-uncertain', title: 'Uncertain', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } }
     ];
@@ -2170,7 +2170,7 @@ class SystemTest {
     const reconcile = new PublishingSchedulingAgent({
       getLatestScheduleEntry: async () => recorded,
       updateScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
     reconcile.youtube = {
       videos: {
         list: async () => {
@@ -2335,7 +2335,7 @@ class SystemTest {
     const { PublishingSchedulingAgent } = require('./agents/publishing-scheduling-agent');
     const agent = new PublishingSchedulingAgent({
       saveScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
     const simulated = await agent.scheduleContent({
       id: 'prod-simulated',
