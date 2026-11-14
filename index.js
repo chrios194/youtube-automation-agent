@@ -1,5 +1,8 @@
 const path = require('path');
-require('dotenv').config({ path: process.env.WORKSPACE_ENV_FILE || path.join(__dirname, '.env') });
+require('dotenv').config({
+  path: process.env.WORKSPACE_ENV_FILE || path.join(__dirname, '.env'),
+  override: process.env.WORKSPACE_STRICT_MODE === 'true'
+});
 
 const express = require('express');
 const fs = require('fs').promises;
@@ -28,6 +31,7 @@ const { GrowthExperimentService } = require('./utils/growth-experiment-service')
 const { AITextService } = require('./utils/ai-text-service');
 const { DiscoverabilityService } = require('./utils/discoverability-service');
 const { getWorkspaceRuntime } = require('./utils/workspace-runtime');
+const { getYouTubeComplianceState, assertMadeForKidsDeclaration } = require('./utils/youtube-compliance-gate');
 const { version } = require('./package.json');
 const chalk = require('chalk');
 
@@ -196,14 +200,15 @@ class YouTubeAutomationAgent {
       hasGemini
     );
     const hasFFmpeg = await checkFFmpeg();
-    const hasUpload = Boolean(creds.youtube && this.credentials.tokens?.youtube);
+    const youtubeCompliance = getYouTubeComplianceState();
+    const hasUpload = Boolean(youtubeCompliance.allowed && creds.youtube && this.credentials.tokens?.youtube);
 
     const capabilities = [
       { name: 'Script & strategy generation', ok: hasText, hint: 'configure an AI provider (npm run credentials:setup)' },
       { name: 'Image generation (visuals/thumbnails)', ok: hasImages, hint: 'requires an OpenAI or Gemini API key — otherwise gradient slides are used' },
       { name: 'Voice narration (TTS)', ok: hasTTS, hint: 'configure OpenAI, Gemini, ElevenLabs, or Azure Speech — otherwise videos are silent' },
       { name: 'Video assembly (FFmpeg)', ok: hasFFmpeg, hint: ffmpegInstallHint() },
-      { name: 'YouTube upload', ok: hasUpload, hint: 'run: npm run credentials:setup' }
+      { name: 'YouTube upload', ok: hasUpload, hint: youtubeCompliance.allowed ? 'run: npm run credentials:setup' : `blocked by API Client compliance gate: ${youtubeCompliance.blockers.join('; ')}` }
     ];
 
     console.log(chalk.cyan('\n🔎 Capability check:'));
@@ -417,6 +422,10 @@ class YouTubeAutomationAgent {
         agents: Object.keys(this.agents),
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
+        youtubeComplianceGate: (() => {
+          const gate = getYouTubeComplianceState();
+          return { allowed: gate.allowed, blockers: gate.blockers };
+        })(),
         workspace: this.runtime.enabled ? {
           id: this.runtime.workspaceId,
           accountId: this.runtime.accountId,
@@ -1619,6 +1628,10 @@ class YouTubeAutomationAgent {
       if (!['private', 'unlisted', 'public'].includes(input.privacyStatus)) throw new Error('Invalid privacy status');
       output.privacyStatus = input.privacyStatus;
     }
+    if (input.selfDeclaredMadeForKids !== undefined && input.selfDeclaredMadeForKids !== null) {
+      if (typeof input.selfDeclaredMadeForKids !== 'boolean') throw new Error('Made for Kids declaration must be an explicit boolean');
+      output.selfDeclaredMadeForKids = input.selfDeclaredMadeForKids;
+    }
     if (input.factChecked !== undefined) output.factChecked = input.factChecked === true;
     if (input.rightsConfirmed !== undefined) output.rightsConfirmed = input.rightsConfirmed === true;
     const experiment = output.packagingExperiment;
@@ -1749,6 +1762,12 @@ class YouTubeAutomationAgent {
     }
 
     const editorData = this.validateEditorData(input, bundle.editorData);
+    try {
+      assertMadeForKidsDeclaration(editorData.selfDeclaredMadeForKids);
+    } catch (error) {
+      error.status = 409;
+      throw error;
+    }
     const packagingExperiment = editorData.packagingExperiment;
     const thumbnailVariant = packagingExperiment?.thumbnailVariants?.[editorData.selectedThumbnailVariant];
     const titleVariant = packagingExperiment?.titleVariants?.[editorData.selectedTitleVariant];
@@ -1778,6 +1797,7 @@ class YouTubeAutomationAgent {
       priority: bundle.priority,
       estimatedDuration: bundle.estimated_duration,
       privacyStatus: editorData.privacyStatus || process.env.DEFAULT_PRIVACY_STATUS || 'private',
+      selfDeclaredMadeForKids: editorData.selfDeclaredMadeForKids,
       provenance: bundle.provenance,
       containsSyntheticMedia: bundle.provenance?.containsSyntheticMedia === true,
       scenes: bundle.scenes || []
@@ -1810,7 +1830,8 @@ class YouTubeAutomationAgent {
         audio: productionData.assets.audio,
         captions: productionData.assets.captions,
         privacyStatus: editorData.privacyStatus || process.env.DEFAULT_PRIVACY_STATUS || 'private',
-        containsSyntheticMedia: productionData.containsSyntheticMedia
+        containsSyntheticMedia: productionData.containsSyntheticMedia,
+        selfDeclaredMadeForKids: productionData.selfDeclaredMadeForKids
       };
       await this.db.updateScheduleEntry(scheduleEntry);
       await this.agents.publishing.loadPublishQueue();
