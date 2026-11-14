@@ -600,17 +600,19 @@ class CredentialManager {
     // Do not attempt YouTube API access while the product compliance gate is closed.
     if (!this.getYouTubeComplianceState().allowed) {
       console.log(chalk.yellow('⏸️  YouTube connection test skipped: API Client compliance gate is closed'));
-    } else try {
-      const youtube = this.getYouTubeClient();
-      await youtube.channels.list({
-        part: 'snippet',
-        mine: true
-      });
-      results.youtube = true;
-      console.log(chalk.green('✅ YouTube API connection successful'));
-    } catch (error) {
-      console.log(chalk.red('❌ YouTube API connection failed'));
-      this.logger.error('YouTube API test failed:', error);
+    } else {
+      try {
+        const youtube = this.getYouTubeClient();
+        await youtube.channels.list({
+          part: 'snippet',
+          mine: true
+        });
+        results.youtube = true;
+        console.log(chalk.green('✅ YouTube API connection successful'));
+      } catch (error) {
+        console.log(chalk.red('❌ YouTube API connection failed'));
+        this.logger.error('YouTube API test failed:', error);
+      }
     }
 
     // Test OpenAI API
