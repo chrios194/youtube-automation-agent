@@ -1535,7 +1535,7 @@ class SystemTest {
       }
       const edited = await service.update(productionId, proposed[0].id, {
         title: 'One approved video, three vertical moments', layout: 'blur',
-        tags: ['Shorts', 'repurposing', 'workflow'], selfDeclaredMadeForKids: false
+        tags: ['Shorts', 'repurposing', 'workflow']
       });
       if (edited.title.length > 100 || edited.layout !== 'blur') throw new Error('Short draft edits did not persist');
       const rendered = await service.render(productionId, edited.id);
