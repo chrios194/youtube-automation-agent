@@ -121,7 +121,7 @@ Alternatively set `DARKZSEO_PATH` to `darkzseo.py`. The adapter uses a shell-fre
 ### What you need
 
 - Node.js 18+
-- A Google account and YouTube Data API credentials
+- A Google account; YouTube API credentials remain disabled until the compliance gate is approved
 - At least one AI text provider key
 - FFmpeg, installed automatically through `ffmpeg-static`
 - Python 3.9+ and DarkzSEO 1.4+ for the optional discoverability preflight
@@ -271,12 +271,13 @@ Long-form productions use hybrid assembly: Lumen generates bounded provider clip
 
 ### API Keys
 
-#### YouTube Data API (required, free)
+#### YouTube Data API (compliance-gated)
 
-1. Create a project in [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable **YouTube Data API v3**
-3. Create an OAuth 2.0 client (Desktop app)
-4. Save the JSON as `config/credentials.json`
+YouTube API access is **disabled by default**. Do not create a Google Cloud API Project, OAuth client, credentials, or user authorization until the actual AgentTube API Client boundary review, child-directed assessment, required compliance audit/approval, and exclusive one-project mapping are documented and the local compliance gate is explicitly approved.
+
+The current gate is in `config/youtube-api-client-compliance.json` and is intentionally blocked. AgentTube is one software product across its account/workspace processes; do not create one API Project per channel or account, share its project with a distinct API Client, or create projects to multiply quota. Account-local user tokens remain isolated.
+
+Before any future OAuth setup, review [YouTube API Client compliance](docs/YOUTUBE-API-CLIENT-COMPLIANCE.md). The credential setup command will fail closed while the gate is blocked.
 
 #### OpenAI
 
@@ -549,9 +550,9 @@ youtube-automation-agent/
 | `'ffmpeg' is not recognized` / no .mp4 produced | Run `npm install` (fetches the bundled binary), or install FFmpeg and set `FFMPEG_PATH` |
 | Video marked `simulated`, nothing uploads | Check the ✗ lines in the startup capability check — a key or FFmpeg is missing |
 | "Processing publish queue" but nothing publishes | The queue log now shows what's waiting; content publishes at its scheduled time (default: next day 2 PM) |
-| YouTube API quota exceeded | Check quotas in Google Cloud Console; reduce posting frequency |
+| YouTube API quota exceeded | Use the official quota-extension process after compliance review; never create projects to shard quota |
 | Content generation failed | Verify API keys and credits; check `logs/` |
-| Publishing failed | Re-authenticate YouTube OAuth tokens; check video format |
+| Publishing blocked | Complete the documented API Client/child-directed/compliance review and exclusive one-project mapping before any OAuth setup |
 
 Enable debug logging:
 
