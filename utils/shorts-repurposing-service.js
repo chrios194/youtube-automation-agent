@@ -156,9 +156,13 @@ class ShortsRepurposingService {
       if (!['private', 'unlisted', 'public'].includes(input.privacyStatus)) throw new Error('Short privacy is invalid');
       changes.privacyStatus = input.privacyStatus;
     }
-    if (input.selfDeclaredMadeForKids !== undefined && input.selfDeclaredMadeForKids !== null) {
-      if (typeof input.selfDeclaredMadeForKids !== 'boolean') throw new Error('Short Made for Kids declaration must be an explicit boolean');
-      changes.selfDeclaredMadeForKids = input.selfDeclaredMadeForKids;
+    if (input.selfDeclaredMadeForKids !== undefined) {
+      if (input.selfDeclaredMadeForKids === null) {
+        changes.selfDeclaredMadeForKids = null;
+      } else {
+        if (typeof input.selfDeclaredMadeForKids !== 'boolean') throw new Error('Short Made for Kids declaration must be an explicit boolean');
+        changes.selfDeclaredMadeForKids = input.selfDeclaredMadeForKids;
+      }
     }
     if (clip.status === 'rendered' && Object.keys(changes).some(key => ['layout'].includes(key))) {
       changes.status = 'proposed';
