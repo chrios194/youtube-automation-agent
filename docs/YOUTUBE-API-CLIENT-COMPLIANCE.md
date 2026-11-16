@@ -1,7 +1,7 @@
 # YouTube API Client boundary and compliance gate
 
 **Reviewed:** 2026-11-15  
-**Product:** AgentTube 3.0.0  
+**Product:** AgentTube Creator Automation 3.0.0  
 **Repository:** `chrios194/youtube-automation-agent`  
 **State:** identified implementation; child-directed assessment and required compliance audit remain incomplete  
 **Provisioning/publishing:** disabled
@@ -21,6 +21,8 @@ Evidence in the inspected `main` revision (`8f84506b97122d04e0b0960c1910fd2e5a61
 **Boundary decision:** workspace accounts are instances of the same AgentTube software product; they do not automatically become separate API Clients. The YouTube channel count, repository count, brand name, or deployment count is not a substitute for the actual software/product boundary. If a genuinely distinct application is later implemented, it requires its own boundary review and exclusive API Project.
 
 This AgentTube workspace model uses one codebase for multiple account processes. It is **not** being adopted as a shared code/repository for AIOS Channels 1–10, because that separate project requires independent channel repositories and code.
+
+A separate repository, `chrios194/AgentTube`, contains a distinct Next.js video-analysis application that uses a YouTube Data API key for public video/channel metadata. It is not part of this creator-automation API Client and must not share this product's API Project or credentials. Its own product boundary, child-directed assessment, and exclusive project mapping must be reviewed independently before any API key is provisioned or used.
 
 ## 2. Child-directed assessment
 
@@ -46,7 +48,13 @@ The app's account-local user authorization namespace is:
 
 Each account's `credentials.json` and `tokens.json` remain under its own configuration directory. User authorization tokens must never be copied or reused across accounts. The API Project count is independent of the number of channel token namespaces.
 
-The current OAuth scope list is broad and includes upload, full YouTube, read-only, analytics read-only, and force-SSL scopes. A least-privilege scope-to-feature review is still required before OAuth consent is enabled.
+The OAuth scope set is centralized in `utils/youtube-oauth-scopes.js`. The broad `youtube` scope was removed; the remaining draft set is:
+- `youtube.upload` for video uploads.
+- `youtube.readonly` for channel/video read access and the current YouTube Analytics `reports.query` authorization requirement.
+- `yt-analytics.readonly` for YouTube Analytics reports.
+- `youtube.force-ssl` for comment and caption write features and Data API methods that accept this narrower write scope.
+
+Google's current authorization guidance says to request the narrowest scopes that support the application's functionality. The compliance gate now requires an evidence-backed least-privilege review, reviewer, date, and an exact match between requested and approved scopes. That review remains pending, so OAuth and all YouTube API access remain blocked.
 
 ## 4. Made for Kids upload control
 
