@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "apiClient": {
     "id": "agenttube-youtube-automation-agent",
-    "productName": "AgentTube",
+    "productName": "AgentTube Creator Automation",
     "productVersion": "3.0.0",
     "repository": "chrios194/youtube-automation-agent",
     "boundaryStatus": "identified_pending_assessment",
@@ -54,12 +54,15 @@
   "oauthScopes": {
     "requested": [
       "https://www.googleapis.com/auth/youtube.upload",
-      "https://www.googleapis.com/auth/youtube",
       "https://www.googleapis.com/auth/youtube.readonly",
       "https://www.googleapis.com/auth/yt-analytics.readonly",
       "https://www.googleapis.com/auth/youtube.force-ssl"
     ],
-    "reviewStatus": "pending_least_privilege_review"
+    "approved": [],
+    "reviewStatus": "pending_least_privilege_review",
+    "reviewedBy": null,
+    "reviewedAt": null,
+    "evidenceRef": null
   },
   "tokenNamespaces": {
     "pattern": "runtime/<workspaceId>/<accountId>/config/tokens.json",
