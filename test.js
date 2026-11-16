@@ -61,6 +61,7 @@ class SystemTest {
       { name: 'Engagement Insight Store', test: () => this.testEngagementInsightStore() },
       { name: 'Reply Draft Lifecycle Store', test: () => this.testReplyDraftStore() },
       { name: 'YouTube Scope Detection', test: () => this.testYouTubeScopeDetection() },
+      { name: 'Legacy OAuth Entry Points Respect Compliance Gate', test: () => this.testLegacyOAuthEntryPointsRespectComplianceGate() },
       { name: 'Audience Comment Sync', test: () => this.testAudienceCommentSync() },
       { name: 'Audience Comment Analysis', test: () => this.testAudienceCommentAnalysis() },
       { name: 'Audience Idea Mining', test: () => this.testAudienceIdeaMining() },
@@ -2743,6 +2744,32 @@ class SystemTest {
     }
 
     this.logger.info('Agent loading test completed successfully');
+  }
+
+  async testLegacyOAuthEntryPointsRespectComplianceGate() {
+    const { OAuthServer } = require('./oauth-server');
+    const { ModernAuth } = require('./modern-auth');
+    const oauth = new OAuthServer();
+    const modern = new ModernAuth();
+
+    const expectBlocked = async (label, action) => {
+      let blocked = false;
+      try {
+        await action();
+      } catch (error) {
+        blocked = error.code === 'YOUTUBE_COMPLIANCE_GATE_BLOCKED' && error.status === 409;
+      }
+      if (!blocked) throw new Error(label + ' bypassed the default-closed YouTube compliance gate');
+    };
+
+    await expectBlocked('OAuthServer.start', () => oauth.start());
+    await expectBlocked('OAuthServer.generateAuthUrl', () => oauth.generateAuthUrl());
+    await expectBlocked('OAuthServer.exchangeCodeForTokens', () => oauth.exchangeCodeForTokens('not-a-real-code'));
+    await expectBlocked('ModernAuth.authenticate', () => modern.authenticate());
+    await expectBlocked('ModernAuth.startTempServer', () => modern.startTempServer(0, {}));
+    await expectBlocked('ModernAuth.testAuthentication', () => modern.testAuthentication());
+
+    this.logger.info('Legacy OAuth entry-point compliance-gate test completed successfully');
   }
 
   async testYouTubeScopeDetection() {
