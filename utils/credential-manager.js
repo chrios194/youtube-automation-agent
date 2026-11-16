@@ -7,6 +7,7 @@ const { Logger } = require('./logger');
 const { PROVIDERS, GEMINI_MODELS, GEMINI_DEFAULT_MODEL } = require('./ai-text-service');
 const { getWorkspaceRuntime } = require('./workspace-runtime');
 const { readSecretFile, writeSecretFile } = require('./secret-store');
+const { YOUTUBE_OAUTH_SCOPES } = require('./youtube-oauth-scopes');
 const { getYouTubeComplianceState, assertYouTubeComplianceGate } = require('./youtube-compliance-gate');
 
 class CredentialManager {
@@ -122,13 +123,7 @@ class CredentialManager {
       this.credentials.youtube.redirect_uris[0]
     );
 
-    const scopes = [
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube',
-      'https://www.googleapis.com/auth/youtube.readonly',
-      'https://www.googleapis.com/auth/yt-analytics.readonly',
-      'https://www.googleapis.com/auth/youtube.force-ssl'
-    ];
+    const scopes = YOUTUBE_OAUTH_SCOPES;
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
