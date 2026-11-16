@@ -62,6 +62,7 @@ class SystemTest {
       { name: 'Reply Draft Lifecycle Store', test: () => this.testReplyDraftStore() },
       { name: 'YouTube Scope Detection', test: () => this.testYouTubeScopeDetection() },
       { name: 'Legacy OAuth Entry Points Respect Compliance Gate', test: () => this.testLegacyOAuthEntryPointsRespectComplianceGate() },
+      { name: 'Walkthrough Does Not Prompt for Unapproved YouTube Projects', test: () => this.testWalkthroughBlocksUnapprovedYouTubeSetup() },
       { name: 'Audience Comment Sync', test: () => this.testAudienceCommentSync() },
       { name: 'Audience Comment Analysis', test: () => this.testAudienceCommentAnalysis() },
       { name: 'Audience Idea Mining', test: () => this.testAudienceIdeaMining() },
@@ -2744,6 +2745,28 @@ class SystemTest {
     }
 
     this.logger.info('Agent loading test completed successfully');
+  }
+
+  async testWalkthroughBlocksUnapprovedYouTubeSetup() {
+    const { SetupWalkthrough } = require('./walkthrough');
+    const inquirer = require('inquirer');
+    const walkthrough = new SetupWalkthrough();
+    const originalPrompt = inquirer.prompt;
+    const originalLog = console.log;
+    let prompted = false;
+    inquirer.prompt = async () => {
+      prompted = true;
+      return { action: 'connect' };
+    };
+    console.log = () => {};
+    try {
+      await walkthrough.stepYouTube();
+    } finally {
+      inquirer.prompt = originalPrompt;
+      console.log = originalLog;
+    }
+    if (prompted) throw new Error('Walkthrough prompted for YouTube project or credentials while compliance gate was blocked');
+    this.logger.info('Walkthrough fail-closed YouTube setup test completed successfully');
   }
 
   async testLegacyOAuthEntryPointsRespectComplianceGate() {
