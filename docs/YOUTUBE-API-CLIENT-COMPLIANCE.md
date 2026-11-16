@@ -73,3 +73,8 @@ The draft remediation restricts inherited variables to a safe OS/runtime allowli
 The repository's default branch is `main`, but its CI workflow was configured only for `master`. The workflow on `main` now triggers for pushes and pull requests targeting both `main` and `master`, and supports manual dispatch. The draft branch carries the same workflow correction; CI results must be verified before merge.
 
 No API Project was created, no OAuth client ID/secret or user token was entered, and no YouTube upload, schedule, comment, or other write action was performed. The default compliance configuration remains blocked until the boundary review, child-directed assessment, required compliance audit/approval, exclusive project mapping, and credential authorization are documented.
+
+
+## 7. Cross-client project uniqueness
+
+Before access can be enabled, the central AIOS API Client registry must record the assigned project and an evidence-backed cross-client uniqueness review. The project ID and OAuth client must not appear in another API Client's mapping. The local gate requires `crossClientUniquenessReviewStatus=approved` and a non-empty evidence reference. The current value is `not_started`, so the gate remains blocked.
