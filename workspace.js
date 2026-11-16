@@ -8,6 +8,11 @@ const { ACCOUNT_ID_PATTERN } = require('./utils/workspace-runtime');
 
 const ROOT = __dirname;
 const DEFAULT_MANIFEST = path.join(ROOT, 'config', 'workspace.json');
+const SAFE_INHERITED_ENV_KEYS = [
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'NODE_ENV', 'TZ', 'CI',
+  'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA',
+  'HOMEDRIVE', 'HOMEPATH', 'SHELL', 'TERM'
+];
 
 function parseEnvFile(text) {
   const output = {};
@@ -88,6 +93,8 @@ async function validateManifest(manifestPath) {
   const seenPorts = new Set();
   const seenDataDirs = new Set();
   const seenConfigDirs = new Set();
+  const seenApiKeys = new Set();
+  const seenMasterKeys = new Set();
   const normalizedAccounts = [];
 
   for (const raw of manifest.accounts) {
@@ -112,6 +119,12 @@ async function validateManifest(manifestPath) {
     if (!parsedEnv.AGENTTUBE_MASTER_KEY || parsedEnv.AGENTTUBE_MASTER_KEY.trim().length < 32) {
       fail(`Account ${id} envFile must define AGENTTUBE_MASTER_KEY of at least 32 characters for encrypted secrets`);
     }
+    const apiKey = parsedEnv.API_KEY.trim();
+    const masterKey = parsedEnv.AGENTTUBE_MASTER_KEY.trim();
+    if (seenApiKeys.has(apiKey)) fail(`Account ${id} reuses another account's API_KEY`);
+    if (seenMasterKeys.has(masterKey)) fail(`Account ${id} reuses another account's AGENTTUBE_MASTER_KEY`);
+    seenApiKeys.add(apiKey);
+    seenMasterKeys.add(masterKey);
 
     const accountRoot = resolveFromRoot(raw.runtimeDir || path.join('runtime', manifest.workspaceId, id));
     const dataDir = path.resolve(raw.dataDir ? resolveFromRoot(raw.dataDir) : path.join(accountRoot, 'data'));
@@ -146,9 +159,15 @@ function formatAccount(account) {
   return `${account.id.padEnd(20)} ${String(account.port).padEnd(6)} ${account.enabled ? 'enabled' : 'disabled'}  ${account.name}`;
 }
 
-function buildAccountEnvironment(config, account) {
+async function buildAccountEnvironment(config, account) {
+  const accountEnv = parseEnvFile(await fsp.readFile(account.envFile, 'utf8'));
+  const inherited = {};
+  for (const key of SAFE_INHERITED_ENV_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(process.env, key)) inherited[key] = process.env[key];
+  }
   return {
-    ...process.env,
+    ...inherited,
+    ...accountEnv,
     WORKSPACE_ID: config.workspaceId,
     WORKSPACE_ACCOUNT_ID: account.id,
     WORKSPACE_ACCOUNT_NAME: account.name,
@@ -179,7 +198,7 @@ async function setupAccountCredentials(config, selectedIds) {
   const child = spawn(process.execPath, ['utils/credential-manager.js', 'setup'], {
     cwd: ROOT,
     stdio: 'inherit',
-    env: buildAccountEnvironment(config, account)
+    env: await buildAccountEnvironment(config, account)
   });
   await new Promise((resolve, reject) => {
     child.once('error', reject);
@@ -198,7 +217,7 @@ async function startWorkspace(config, selectedIds) {
     const child = spawn(process.execPath, ['index.js'], {
       cwd: ROOT,
       stdio: 'inherit',
-      env: buildAccountEnvironment(config, account)
+      env: await buildAccountEnvironment(config, account)
     });
     children.push({ account, child });
     child.once('exit', (code, signal) => {
@@ -241,7 +260,11 @@ async function main() {
   await startWorkspace(config, options.accountIds);
 }
 
-main().catch(error => {
-  console.error(`Workspace launcher error: ${error.message}`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch(error => {
+    console.error(`Workspace launcher error: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { parseEnvFile, validateManifest, buildAccountEnvironment, SAFE_INHERITED_ENV_KEYS };

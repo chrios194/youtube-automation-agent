@@ -7,6 +7,8 @@ const { Logger } = require('./logger');
 const { PROVIDERS, GEMINI_MODELS, GEMINI_DEFAULT_MODEL } = require('./ai-text-service');
 const { getWorkspaceRuntime } = require('./workspace-runtime');
 const { readSecretFile, writeSecretFile } = require('./secret-store');
+const { YOUTUBE_OAUTH_SCOPES } = require('./youtube-oauth-scopes');
+const { getYouTubeComplianceState, assertYouTubeComplianceGate } = require('./youtube-compliance-gate');
 
 class CredentialManager {
   constructor(options = {}) {
@@ -17,6 +19,8 @@ class CredentialManager {
     this.credentials = {};
     this.tokens = {};
     this.masterKey = options.masterKey || process.env.AGENTTUBE_MASTER_KEY || null;
+    this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
     if (this.runtime.strictMode && !this.masterKey) {
       throw new Error('Workspace strict mode requires AGENTTUBE_MASTER_KEY (32+ characters) for encrypted credential storage');
     }
@@ -65,9 +69,9 @@ class CredentialManager {
 
   // YouTube API Authentication
   async setupYouTubeCredentials() {
+    const gate = this.assertYouTubeComplianceGate('YouTube OAuth credential provisioning');
     console.log(chalk.cyan('\n🎬 YouTube API Setup'));
-    console.log(chalk.gray('You need to create a YouTube Data API project in Google Cloud Console'));
-    console.log(chalk.gray('Visit: https://console.cloud.google.com/'));
+    console.log(chalk.gray('The approved AgentTube API Project and OAuth client must match the compliance record.'));
     
     const answers = await inquirer.prompt([
       {
@@ -90,6 +94,13 @@ class CredentialManager {
       }
     ]);
 
+    if (answers.clientId !== gate.config?.apiProject?.oauthClientId) {
+      const error = new Error('OAuth client ID does not match the single API Project approved for this AgentTube API Client');
+      error.status = 409;
+      error.code = 'YOUTUBE_API_CLIENT_ID_MISMATCH';
+      throw error;
+    }
+
     this.credentials.youtube = {
       client_id: answers.clientId,
       client_secret: answers.clientSecret,
@@ -105,19 +116,14 @@ class CredentialManager {
   }
 
   async authenticateYouTube() {
+    this.assertYouTubeComplianceGate('YouTube OAuth authorization');
     const oauth2Client = new google.auth.OAuth2(
       this.credentials.youtube.client_id,
       this.credentials.youtube.client_secret,
       this.credentials.youtube.redirect_uris[0]
     );
 
-    const scopes = [
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube',
-      'https://www.googleapis.com/auth/youtube.readonly',
-      'https://www.googleapis.com/auth/yt-analytics.readonly',
-      'https://www.googleapis.com/auth/youtube.force-ssl'
-    ];
+    const scopes = YOUTUBE_OAUTH_SCOPES;
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
@@ -146,6 +152,13 @@ class CredentialManager {
   }
 
   getYouTubeAuth() {
+    const gate = this.assertYouTubeComplianceGate('YouTube API access');
+    if (gate.config?.apiProject?.oauthClientId && this.credentials.youtube?.client_id !== gate.config.apiProject.oauthClientId) {
+      const error = new Error('Stored OAuth client ID does not match the single API Project approved for this AgentTube API Client');
+      error.status = 409;
+      error.code = 'YOUTUBE_API_CLIENT_ID_MISMATCH';
+      throw error;
+    }
     if (!this.credentials.youtube || !this.tokens.youtube) {
       throw new Error('YouTube credentials not configured');
     }
@@ -534,7 +547,7 @@ class CredentialManager {
   getMissingCredentials() {
     const missing = [];
 
-    if (!this.credentials.youtube) {
+    if (this.getYouTubeComplianceState().allowed && !this.credentials.youtube) {
       missing.push('youtube');
     }
 
@@ -561,8 +574,8 @@ class CredentialManager {
       return false;
     }
 
-    // Validate YouTube tokens
-    if (!this.tokens.youtube) {
+    // YouTube authorization is not a startup prerequisite while the compliance gate is closed.
+    if (this.getYouTubeComplianceState().allowed && !this.tokens.youtube) {
       console.log(chalk.yellow('\n⚠️  YouTube authentication required'));
       return false;
     }
@@ -579,18 +592,22 @@ class CredentialManager {
       azureSpeech: false
     };
 
-    // Test YouTube API
-    try {
-      const youtube = this.getYouTubeClient();
-      await youtube.channels.list({
-        part: 'snippet',
-        mine: true
-      });
-      results.youtube = true;
-      console.log(chalk.green('✅ YouTube API connection successful'));
-    } catch (error) {
-      console.log(chalk.red('❌ YouTube API connection failed'));
-      this.logger.error('YouTube API test failed:', error);
+    // Do not attempt YouTube API access while the product compliance gate is closed.
+    if (!this.getYouTubeComplianceState().allowed) {
+      console.log(chalk.yellow('⏸️  YouTube connection test skipped: API Client compliance gate is closed'));
+    } else {
+      try {
+        const youtube = this.getYouTubeClient();
+        await youtube.channels.list({
+          part: 'snippet',
+          mine: true
+        });
+        results.youtube = true;
+        console.log(chalk.green('✅ YouTube API connection successful'));
+      } catch (error) {
+        console.log(chalk.red('❌ YouTube API connection failed'));
+        this.logger.error('YouTube API test failed:', error);
+      }
     }
 
     // Test OpenAI API
@@ -616,13 +633,18 @@ class CredentialManager {
     console.log(chalk.cyan.bold('\n🚀 YouTube Automation Agent Setup Wizard'));
     console.log(chalk.gray('Let\'s configure your credentials and settings...\n'));
 
-    const setupSteps = [
-      { name: '🎬 YouTube API', action: () => this.setupYouTubeCredentials() },
+    const setupSteps = [];
+    if (this.getYouTubeComplianceState().allowed) {
+      setupSteps.push({ name: '🎬 YouTube API', action: () => this.setupYouTubeCredentials() });
+    } else {
+      console.log(chalk.yellow('⏸️  YouTube OAuth setup skipped until the API Client boundary, child-directed assessment, and required compliance review are approved.'));
+    }
+    setupSteps.push(
       { name: '🤖 AI Service (OpenAI/Gemini)', action: () => this.setupAIService() },
       { name: '🎙️  Text-to-Speech Service', action: () => this.setupTTSService() },
       { name: '📺 Channel Configuration', action: () => this.setupChannelConfig() },
       { name: '📝 Content Configuration', action: () => this.setupContentConfig() }
-    ];
+    );
 
     for (const step of setupSteps) {
       console.log(chalk.cyan(`\n${step.name}`));

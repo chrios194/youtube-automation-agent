@@ -4,6 +4,8 @@ const path = require('path');
 const chalk = require('chalk');
 const http = require('http');
 const { URL } = require('url');
+const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
+const { YOUTUBE_OAUTH_SCOPES } = require('./utils/youtube-oauth-scopes');
 
 class ModernAuth {
   constructor() {
@@ -13,6 +15,7 @@ class ModernAuth {
   }
 
   async authenticate() {
+    assertYouTubeComplianceGate('Legacy modern OAuth authorization');
     console.log(chalk.cyan.bold('\n🔐 YouTube Authentication (Modern Flow)'));
     console.log(chalk.gray('═'.repeat(60)));
     
@@ -29,13 +32,7 @@ class ModernAuth {
         redirectUri
       );
 
-      const scopes = [
-        'https://www.googleapis.com/auth/youtube.upload',
-        'https://www.googleapis.com/auth/youtube',
-        'https://www.googleapis.com/auth/youtube.readonly',
-        'https://www.googleapis.com/auth/yt-analytics.readonly',
-        'https://www.googleapis.com/auth/youtube.force-ssl'
-      ];
+      const scopes = YOUTUBE_OAUTH_SCOPES;
 
       // Start a temporary local server
       await this.startTempServer(port, oauth2Client);
@@ -83,6 +80,7 @@ class ModernAuth {
   }
 
   async startTempServer(port, oauth2Client) {
+    assertYouTubeComplianceGate('Legacy modern OAuth callback server startup');
     this.server = http.createServer(async (req, res) => {
       const url = new URL(req.url, `http://localhost:${port}`);
       
@@ -103,6 +101,7 @@ class ModernAuth {
         
         if (code) {
           try {
+            assertYouTubeComplianceGate('Legacy modern OAuth callback token exchange');
             const { tokens } = await oauth2Client.getToken(code);
             
             // Save tokens
@@ -160,6 +159,7 @@ class ModernAuth {
   }
 
   async testAuthentication() {
+    assertYouTubeComplianceGate('Legacy modern OAuth token validation');
     try {
       const tokens = JSON.parse(fs.readFileSync(this.tokensPath));
       const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));

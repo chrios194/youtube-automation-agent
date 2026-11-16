@@ -4,18 +4,29 @@ const fsSync = require('fs');
 const path = require('path');
 const { Logger } = require('../utils/logger');
 const { assertValidYouTubeMetadata } = require('../utils/youtube-metadata-validator');
+const { getYouTubeComplianceState, assertYouTubeComplianceGate, assertMadeForKidsDeclaration } = require('../utils/youtube-compliance-gate');
 
 class PublishingSchedulingAgent {
-  constructor(db, credentials) {
+  constructor(db, credentials, options = {}) {
     this.db = db;
     this.credentials = credentials;
     this.logger = new Logger('PublishingScheduling');
     this.youtube = null;
     this.publishQueue = [];
+    this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    this.complianceBlocked = false;
   }
 
   async initialize() {
     this.logger.info('Initializing Publishing & Scheduling Agent...');
+    const gate = this.getYouTubeComplianceState();
+    if (!gate.allowed) {
+      this.complianceBlocked = true;
+      this.logger.warn('YouTube publishing remains disabled by the API Client compliance gate: ' + gate.blockers.join('; '));
+      await this.loadPublishQueue();
+      return true;
+    }
     await this.setupYouTubeAPI();
     await this.loadPublishQueue();
     return true;
@@ -23,6 +34,7 @@ class PublishingSchedulingAgent {
 
   async setupYouTubeAPI() {
     try {
+      this.assertYouTubeComplianceGate('YouTube API initialization');
       const auth = this.credentials.getYouTubeAuth();
       this.youtube = google.youtube({ version: 'v3', auth });
       this.logger.info('YouTube API initialized');
@@ -44,6 +56,7 @@ class PublishingSchedulingAgent {
 
   async scheduleContent(productionData) {
     try {
+      this.assertYouTubeComplianceGate('YouTube scheduling');
       const finalVideo = productionData.assets?.finalVideo;
       if (!finalVideo || finalVideo.simulated || path.extname(finalVideo.path || '').toLowerCase() !== '.mp4') {
         this.logger.warn(`Not scheduling ${productionData.id}: no real video file was produced (placeholder/simulated output). Fix your AI provider keys and FFmpeg, then regenerate.`);
@@ -53,10 +66,13 @@ class PublishingSchedulingAgent {
         this.logger.warn(`Not scheduling ${productionData.id}: narration is missing. Regenerate narration or explicitly confirm an intentional silent video.`);
         return null;
       }
+      const selfDeclaredMadeForKids = assertMadeForKidsDeclaration(productionData.selfDeclaredMadeForKids);
 
       this.logger.info(`Scheduling content: ${productionData.id}`);
       const existing = await this.db.getLatestScheduleEntry?.(productionData.id);
       if (existing) {
+        existing.metadata = { ...(existing.metadata || {}), selfDeclaredMadeForKids };
+        if (this.db.updateScheduleEntry) await this.db.updateScheduleEntry(existing);
         if (['scheduled', 'paused'].includes(existing.status) && !this.publishQueue.some(entry => entry.id === existing.id)) {
           this.publishQueue.push(existing);
           this.publishQueue.sort((a, b) => new Date(a.publishTime) - new Date(b.publishTime));
@@ -79,6 +95,7 @@ class PublishingSchedulingAgent {
           captions: productionData.assets.captions,
           privacyStatus: productionData.privacyStatus || process.env.DEFAULT_PRIVACY_STATUS || 'private',
           containsSyntheticMedia: productionData.containsSyntheticMedia === true,
+          selfDeclaredMadeForKids,
           contentType: productionData.contentType || 'long_form',
           sourceProductionId: productionData.sourceProductionId || productionData.id,
           shortClipId: productionData.shortClipId || null
@@ -100,6 +117,7 @@ class PublishingSchedulingAgent {
 
   async publishContent(contentId) {
     try {
+      this.assertYouTubeComplianceGate('YouTube publishing');
       let productionBundle = null;
       if (this.db.getLatestReadinessRun) {
         const readiness = await this.db.getLatestReadinessRun();
@@ -135,6 +153,7 @@ class PublishingSchedulingAgent {
         throw new Error(`Content not found in queue: ${contentId}`);
       }
       if (scheduleEntry.status === 'published') return scheduleEntry;
+      assertMadeForKidsDeclaration(scheduleEntry.metadata?.selfDeclaredMadeForKids);
       if (!await this.isNarrationReady(scheduleEntry.metadata?.audio || productionBundle?.assets?.audio)) {
         const error = new Error('Publishing is blocked because narration is missing or the intentional-silence override is incomplete');
         error.status = 409;
@@ -197,7 +216,9 @@ class PublishingSchedulingAgent {
   }
 
   async uploadToYouTube(scheduleEntry) {
+    this.assertYouTubeComplianceGate('YouTube video upload');
     const { metadata } = scheduleEntry;
+    const selfDeclaredMadeForKids = assertMadeForKidsDeclaration(metadata.selfDeclaredMadeForKids);
     const validation = assertValidYouTubeMetadata(metadata.seo);
     if (validation.warnings.length) {
       this.logger.warn(`YouTube metadata warnings: ${validation.warnings.join(' ')}`);
@@ -217,7 +238,7 @@ class PublishingSchedulingAgent {
       status: {
         privacyStatus: metadata.privacyStatus || process.env.DEFAULT_PRIVACY_STATUS || 'private',
         publishAt: scheduleEntry.publishTime,
-        selfDeclaredMadeForKids: false,
+        selfDeclaredMadeForKids,
         containsSyntheticMedia: metadata.containsSyntheticMedia === true
       }
     };
@@ -273,6 +294,7 @@ class PublishingSchedulingAgent {
   }
 
   async reconcileUploadedVideo(scheduleEntry) {
+    this.assertYouTubeComplianceGate('YouTube upload reconciliation');
     const response = await this.youtube.videos.list({ part: 'id,status', id: scheduleEntry.youtubeId });
     if (!response.data.items?.some(video => video.id === scheduleEntry.youtubeId)) {
       scheduleEntry.status = 'reconciliation_required';
@@ -320,6 +342,7 @@ class PublishingSchedulingAgent {
     }
   }
   async uploadThumbnail(videoId, thumbnailPath) {
+    this.assertYouTubeComplianceGate('YouTube thumbnail upload');
     try {
       const thumbnailBuffer = await fs.readFile(thumbnailPath);
       
@@ -337,6 +360,7 @@ class PublishingSchedulingAgent {
   }
 
   async applyVideoPackaging(videoId, packaging = {}, previousPackaging = null) {
+    this.assertYouTubeComplianceGate('YouTube video packaging update');
     const title = String(packaging.title || '').trim();
     if (!videoId || !title || title.length > 100 || !packaging.thumbnailPath) {
       const error = new Error('A valid video ID, title, and thumbnail are required for a packaging change');
@@ -388,6 +412,7 @@ class PublishingSchedulingAgent {
   }
 
   async uploadCaptions(videoId, captionsPath) {
+    this.assertYouTubeComplianceGate('YouTube captions upload');
     try {
       const captionsContent = await fs.readFile(captionsPath, 'utf8');
       
@@ -413,6 +438,13 @@ class PublishingSchedulingAgent {
   }
 
   async processPublishQueue() {
+    const gate = this.getYouTubeComplianceState();
+    if (!gate.allowed) {
+      this.complianceBlocked = true;
+      this.logger.warn('Publish queue remains paused; no YouTube write actions will run until compliance approval.');
+      return 0;
+    }
+    this.complianceBlocked = false;
     const now = new Date();
     const scheduled = this.publishQueue
       .filter(entry => entry.status === 'scheduled')

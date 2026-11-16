@@ -976,6 +976,7 @@ function renderShortsStudio(item) {
             <label><span>Vertical layout</span><select data-short-field="layout" ${locked ? 'disabled' : ''}><option value="blur" ${clip.layout === 'blur' ? 'selected' : ''}>Blurred canvas</option><option value="crop" ${clip.layout === 'crop' ? 'selected' : ''}>Center crop</option><option value="stacked" ${clip.layout === 'stacked' ? 'selected' : ''}>Stacked focus</option></select></label>
             <label><span>Publish time</span><input data-short-field="publishTime" type="datetime-local" value="${toLocalInput(clip.publishTime)}" ${locked ? 'disabled' : ''}></label>
             <label><span>Privacy</span><select data-short-field="privacyStatus" ${locked ? 'disabled' : ''}><option value="private" ${clip.privacyStatus === 'private' ? 'selected' : ''}>Private</option><option value="unlisted" ${clip.privacyStatus === 'unlisted' ? 'selected' : ''}>Unlisted</option><option value="public" ${clip.privacyStatus === 'public' ? 'selected' : ''}>Public</option></select></label>
+            <label><span>Made for Kids — required per Short</span><select data-short-field="selfDeclaredMadeForKids" ${locked ? 'disabled' : ''} required><option value="" ${typeof clip.selfDeclaredMadeForKids !== 'boolean' ? 'selected' : ''}>Select status…</option><option value="false" ${clip.selfDeclaredMadeForKids === false ? 'selected' : ''}>No — not made for kids</option><option value="true" ${clip.selfDeclaredMadeForKids === true ? 'selected' : ''}>Yes — made for kids</option></select></label>
           </div>
           <p class="short-rationale">${escapeHTML(clip.rationale || '')}${clip.error ? `<br><span class="danger-text">${escapeHTML(clip.error)}</span>` : ''}</p>
           ${clip.youtubeUrl ? `<a class="source-link" href="${escapeHTML(clip.youtubeUrl)}" target="_blank" rel="noopener">Open published Short ↗</a>` : ''}
@@ -1026,6 +1027,7 @@ async function openContent(productionId) {
           <div class="form-grid two">
             <label><span>Publish time</span><input name="publishTime" type="datetime-local" value="${toLocalInput(publishTime)}"></label>
             <label><span>Privacy</span><select name="privacyStatus"><option value="private" ${data.privacyStatus === 'private' ? 'selected' : ''}>Private</option><option value="unlisted" ${data.privacyStatus === 'unlisted' ? 'selected' : ''}>Unlisted</option><option value="public" ${data.privacyStatus === 'public' ? 'selected' : ''}>Public</option></select></label>
+            <label><span>Made for Kids — required per video</span><select name="selfDeclaredMadeForKids" required><option value="" ${typeof data.selfDeclaredMadeForKids !== 'boolean' ? 'selected' : ''}>Select status…</option><option value="false" ${data.selfDeclaredMadeForKids === false ? 'selected' : ''}>No — not made for kids</option><option value="true" ${data.selfDeclaredMadeForKids === true ? 'selected' : ''}>Yes — made for kids</option></select></label>
           </div>
           <div class="settings-row">
             <label class="toggle"><input name="factChecked" type="checkbox" ${data.factChecked ? 'checked' : ''}><span></span> Facts and claims reviewed</label>
@@ -1059,6 +1061,7 @@ function contentFormData() {
     tags: values.tags,
     publishTime: values.publishTime ? new Date(values.publishTime).toISOString() : undefined,
     privacyStatus: values.privacyStatus,
+    selfDeclaredMadeForKids: values.selfDeclaredMadeForKids === 'true' ? true : values.selfDeclaredMadeForKids === 'false' ? false : null,
     selectedTitleVariant: values.selectedTitleVariant,
     selectedThumbnailVariant: values.selectedThumbnailVariant,
     factChecked: form.elements.factChecked?.checked || false,
@@ -1085,7 +1088,12 @@ function shortFormData(card) {
     tags: card.querySelector('[data-short-field="tags"]')?.value,
     layout: card.querySelector('[data-short-field="layout"]')?.value,
     publishTime: publishTime ? new Date(publishTime).toISOString() : undefined,
-    privacyStatus: card.querySelector('[data-short-field="privacyStatus"]')?.value
+    privacyStatus: card.querySelector('[data-short-field="privacyStatus"]')?.value,
+    selfDeclaredMadeForKids: card.querySelector('[data-short-field="selfDeclaredMadeForKids"]')?.value === 'true'
+      ? true
+      : card.querySelector('[data-short-field="selfDeclaredMadeForKids"]')?.value === 'false'
+        ? false
+        : null
   };
 }
 

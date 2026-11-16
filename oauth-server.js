@@ -3,6 +3,8 @@ const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
+const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
+const { YOUTUBE_OAUTH_SCOPES } = require('./utils/youtube-oauth-scopes');
 
 class OAuthServer {
   constructor() {
@@ -66,6 +68,7 @@ class OAuthServer {
   }
 
   async exchangeCodeForTokens(code) {
+    assertYouTubeComplianceGate('Legacy OAuth token exchange');
     const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
     const tokensPath = path.join(__dirname, 'config', 'tokens.json');
     
@@ -104,6 +107,7 @@ class OAuthServer {
   }
 
   start() {
+    assertYouTubeComplianceGate('Legacy OAuth server startup');
     this.server = this.app.listen(8080, () => {
       console.log(chalk.cyan('\n🔐 OAuth callback server started on http://localhost:8080'));
       this.generateAuthUrl();
@@ -111,6 +115,7 @@ class OAuthServer {
   }
 
   generateAuthUrl() {
+    assertYouTubeComplianceGate('Legacy OAuth authorization URL generation');
     const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
     const credentials = JSON.parse(fs.readFileSync(credentialsPath));
     
@@ -120,13 +125,7 @@ class OAuthServer {
       credentials.youtube.redirect_uris[0]
     );
 
-    const scopes = [
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube',
-      'https://www.googleapis.com/auth/youtube.readonly',
-      'https://www.googleapis.com/auth/yt-analytics.readonly',
-      'https://www.googleapis.com/auth/youtube.force-ssl'
-    ];
+    const scopes = YOUTUBE_OAUTH_SCOPES;
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',

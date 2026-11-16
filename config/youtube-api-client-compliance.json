@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "apiClient": {
+    "id": "agenttube-youtube-automation-agent",
+    "productName": "AgentTube Creator Automation",
+    "productVersion": "3.0.0",
+    "repository": "chrios194/youtube-automation-agent",
+    "boundaryStatus": "identified_pending_assessment",
+    "needsCredentials": true,
+    "usesYouTubeDataApiV3": true,
+    "usesUserAuthorization": true,
+    "oauthClientId": null
+  },
+  "boundaryReview": {
+    "status": "identified_pending_deployment_and_child_audience_review",
+    "reviewedAt": "2026-11-15",
+    "evidenceRefs": [
+      "README.md: AgentTube creator-business operating system and operator workflow",
+      "docs/multi-account-workspaces.md: one AgentTube product launches isolated account processes",
+      "index.js: Express application initializes PublishingSchedulingAgent",
+      "agents/publishing-scheduling-agent.js: google.youtube(v3) and videos.insert"
+    ]
+  },
+  "childDirectedAssessment": {
+    "status": "not_assessed",
+    "preliminaryObservation": "Reviewed product documentation describes an operator-facing creator-business tool for creators, operators, builders, and business teams. No child-facing product positioning was identified in the reviewed documentation. Full dashboard, marketing, actual user demographics, and applicable-law review remain incomplete. A channel viewer audience and a video's Made for Kids declaration are separate from the API Client's intended users.",
+    "evidenceRefs": [
+      "README.md: creator-business, operator, and channel-workflow product positioning",
+      "docs/multi-account-workspaces.md: creator account operator model",
+      "config/passports/creator-passport.example.json: sample audience is operators, builders, and business teams"
+    ],
+    "assessmentFactors": [
+      "intended users and product positioning",
+      "dashboard and onboarding design",
+      "visual and audio presentation",
+      "child-oriented features, characters, activities, or subject matter",
+      "marketing, advertising, and distribution",
+      "reliable user-age and audience evidence",
+      "whether any product component targets or directs itself to children"
+    ]
+  },
+  "complianceAudit": {
+    "status": "not_started",
+    "requiredOrNotRequired": "not_determined",
+    "evidenceRef": null
+  },
+  "apiProject": {
+    "projectId": null,
+    "oauthClientId": null,
+    "ownerApiClientId": null,
+    "credentialsExclusiveToClient": false,
+    "projectCountForClient": 0,
+    "crossClientUniquenessReviewStatus": "not_started",
+    "crossClientUniquenessEvidenceRef": null
+  },
+  "oauthScopes": {
+    "requested": [
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/youtube.readonly",
+      "https://www.googleapis.com/auth/yt-analytics.readonly",
+      "https://www.googleapis.com/auth/youtube.force-ssl"
+    ],
+    "approved": [],
+    "reviewStatus": "pending_least_privilege_review",
+    "reviewedBy": null,
+    "reviewedAt": null,
+    "evidenceRef": null
+  },
+  "tokenNamespaces": {
+    "pattern": "runtime/<workspaceId>/<accountId>/config/tokens.json",
+    "perAccountIsolated": true,
+    "crossAccountTokenReuseAllowed": false,
+    "apiProjectCountIndependent": true
+  },
+  "controls": {
+    "projectProvisioningAllowed": false,
+    "credentialProvisioningAllowed": false,
+    "publishingAllowed": false,
+    "quotaShardingAllowed": false,
+    "perChannelProjectCreationAllowed": false,
+    "madeForKidsDeclarationRequiredPerVideo": true
+  }
+}

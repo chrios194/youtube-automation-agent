@@ -5,6 +5,11 @@ const { AudienceEngagementService } = require('./utils/audience-engagement-servi
 const { DailyAutomation } = require('./schedules/daily-automation');
 const chalk = require('chalk');
 const path = require('path');
+
+const ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS = {
+  getYouTubeComplianceState: () => ({ allowed: true, blockers: [] }),
+  assertYouTubeComplianceGate: () => ({ allowed: true, config: { apiProject: { oauthClientId: 'test-client' } } })
+};
 const { ProductionReadinessService } = require('./utils/production-readiness-service');
 const { normalizeTags, validateYouTubeMetadata } = require('./utils/youtube-metadata-validator');
 
@@ -56,6 +61,9 @@ class SystemTest {
       { name: 'Engagement Insight Store', test: () => this.testEngagementInsightStore() },
       { name: 'Reply Draft Lifecycle Store', test: () => this.testReplyDraftStore() },
       { name: 'YouTube Scope Detection', test: () => this.testYouTubeScopeDetection() },
+      { name: 'Legacy OAuth Entry Points Respect Compliance Gate', test: () => this.testLegacyOAuthEntryPointsRespectComplianceGate() },
+      { name: 'Walkthrough Does Not Prompt for Unapproved YouTube Projects', test: () => this.testWalkthroughBlocksUnapprovedYouTubeSetup() },
+      { name: 'Setup Defaults YouTube Publishing to Disabled', test: () => this.testSetupDefaultsPublishingDisabled() },
       { name: 'Audience Comment Sync', test: () => this.testAudienceCommentSync() },
       { name: 'Audience Comment Analysis', test: () => this.testAudienceCommentAnalysis() },
       { name: 'Audience Idea Mining', test: () => this.testAudienceIdeaMining() },
@@ -1520,7 +1528,7 @@ class SystemTest {
         { id: 'short-source-3', label: 'Result', scriptText: 'Render locally and review every Short before it reaches the schedule.', prompt: 'Result', duration: 1.3, assetType: 'video', assetPath: sourceVideo, audioPath, status: 'ready', narrationStatus: 'current', rightsConfirmed: true }
       ]);
 
-      const publishing = new PublishingSchedulingAgent(db, {});
+      const publishing = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       const service = new ShortsRepurposingService(db, publishing, {
         dataRoot: path.join(directory, 'shorts'), width: 360, height: 640, logger: this.logger
       });
@@ -1546,8 +1554,16 @@ class SystemTest {
         approvalBlocked = error.code === 'SHORT_APPROVAL_REQUIRED';
       }
       if (!approvalBlocked) throw new Error('Short scheduling bypassed explicit approval confirmation');
+      let madeForKidsBlocked = false;
+      try {
+        await service.approve(productionId, rendered.id, { confirmed: true, privacyStatus: 'private' });
+      } catch (error) {
+        madeForKidsBlocked = error.code === 'MADE_FOR_KIDS_DECLARATION_REQUIRED';
+      }
+      if (!madeForKidsBlocked) throw new Error('Short approval did not require an explicit Made for Kids declaration');
       const scheduled = await service.approve(productionId, rendered.id, {
-        confirmed: true, publishTime: new Date(Date.now() + 172800000).toISOString(), privacyStatus: 'private'
+        confirmed: true, publishTime: new Date(Date.now() + 172800000).toISOString(), privacyStatus: 'private',
+        selfDeclaredMadeForKids: false
       });
       const schedule = await db.getLatestScheduleEntry(rendered.id);
       if (
@@ -1637,7 +1653,7 @@ class SystemTest {
         throw new Error('Generated research sources and claims were not initialized as unresolved provenance');
       }
 
-      const publishGuard = new PublishingSchedulingAgent(db, {});
+      const publishGuard = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       publishGuard.publishQueue = [{ productionId, status: 'scheduled', metadata: {} }];
       let blockedPublishRejected = false;
       try {
@@ -1674,7 +1690,7 @@ class SystemTest {
       }
 
       let uploadRequest;
-      const publishing = new PublishingSchedulingAgent(db, {});
+      const publishing = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       publishing.youtube = {
         videos: { insert: async request => { uploadRequest = request; return { data: { id: 'provenance-video' } }; } }
       };
@@ -1684,6 +1700,7 @@ class SystemTest {
           seo: production.seo,
           video: { path: videoPath },
           privacyStatus: 'private',
+          selfDeclaredMadeForKids: false,
           containsSyntheticMedia: true
         }
       });
@@ -2082,11 +2099,11 @@ class SystemTest {
     };
     const agent = new PublishingSchedulingAgent({
       updateScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
     agent.publishQueue = [
-      { productionId: 'prod-a', title: 'A', status: 'scheduled', metadata: { audio: intentionalAudio } },
-      { productionId: 'prod-b', title: 'B', status: 'scheduled', metadata: { audio: intentionalAudio } }
+      { productionId: 'prod-a', title: 'A', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } },
+      { productionId: 'prod-b', title: 'B', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } }
     ];
     agent.uploadToYouTube = async () => ({ id: 'youtube-1' });
 
@@ -2096,8 +2113,8 @@ class SystemTest {
       throw new Error('publishContent removed the wrong publish queue entries');
     }
 
-    const missingNarration = new PublishingSchedulingAgent({ updateScheduleEntry: async () => {} }, {});
-    missingNarration.publishQueue = [{ productionId: 'prod-no-audio', status: 'scheduled', metadata: {} }];
+    const missingNarration = new PublishingSchedulingAgent({ updateScheduleEntry: async () => {} }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
+    missingNarration.publishQueue = [{ productionId: 'prod-no-audio', status: 'scheduled', metadata: { selfDeclaredMadeForKids: false } }];
     missingNarration.uploadToYouTube = async () => { throw new Error('Upload must not start without narration'); };
     let narrationPublishBlocked = false;
     try {
@@ -2121,9 +2138,9 @@ class SystemTest {
     let uncertainUpdates = [];
     const uncertain = new PublishingSchedulingAgent({
       updateScheduleEntry: async entry => uncertainUpdates.push({ ...entry })
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
     uncertain.publishQueue = [
-      { id: 'schedule-uncertain', productionId: 'prod-uncertain', title: 'Uncertain', status: 'scheduled', metadata: { audio: intentionalAudio } }
+      { id: 'schedule-uncertain', productionId: 'prod-uncertain', title: 'Uncertain', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } }
     ];
     let uploadAttempts = 0;
     uncertain.uploadToYouTube = async entry => {
@@ -2151,12 +2168,12 @@ class SystemTest {
     let reconciliationCalls = 0;
     const recorded = {
       id: 'schedule-recorded', productionId: 'prod-recorded', title: 'Recorded', status: 'uploaded',
-      youtubeId: 'youtube-existing', metadata: { audio: intentionalAudio }
+      youtubeId: 'youtube-existing', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false }
     };
     const reconcile = new PublishingSchedulingAgent({
       getLatestScheduleEntry: async () => recorded,
       updateScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
     reconcile.youtube = {
       videos: {
         list: async () => {
@@ -2206,9 +2223,18 @@ class SystemTest {
       }
 
       manager.credentials = { openai: { apiKey: 'sk-test' } };
-      const missingYouTube = manager.getMissingCredentials();
+      const youtubeOptionalWhileBlocked = manager.getMissingCredentials();
+      if (youtubeOptionalWhileBlocked.length !== 0) {
+        throw new Error('YouTube credentials were required while the compliance gate is closed');
+      }
+      const gateOpenManager = new CredentialManager({
+        getYouTubeComplianceState: () => ({ allowed: true, blockers: [] }),
+        assertYouTubeComplianceGate: () => ({ allowed: true, config: { apiProject: { oauthClientId: 'approved-client' } } })
+      });
+      gateOpenManager.credentials = { openai: { apiKey: 'sk-test' } };
+      const missingYouTube = gateOpenManager.getMissingCredentials();
       if (missingYouTube.length !== 1 || missingYouTube[0] !== 'youtube') {
-        throw new Error('Missing YouTube credentials were not detected');
+        throw new Error('Missing YouTube credentials were not detected after the compliance gate was approved');
       }
     } finally {
       for (const key of envKeys) {
@@ -2312,7 +2338,7 @@ class SystemTest {
     const { PublishingSchedulingAgent } = require('./agents/publishing-scheduling-agent');
     const agent = new PublishingSchedulingAgent({
       saveScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
     const simulated = await agent.scheduleContent({
       id: 'prod-simulated',
@@ -2335,7 +2361,7 @@ class SystemTest {
     const missingNarration = await agent.scheduleContent({
       id: 'prod-no-narration', script: { title: 'No narration' }, priority: 50,
       scheduledPublishTime: new Date().toISOString(),
-      assets: { finalVideo: { path: 'video.mp4' } }, seo: {}
+      assets: { finalVideo: { path: 'video.mp4' } }, seo: {}, selfDeclaredMadeForKids: false
     });
     if (missingNarration !== null) throw new Error('Production without narration was scheduled for publishing');
 
@@ -2352,7 +2378,8 @@ class SystemTest {
           silenceConfirmedAt: new Date().toISOString()
         }
       },
-      seo: {}
+      seo: {},
+      selfDeclaredMadeForKids: false
     });
     if (!real || agent.publishQueue.length !== 1) {
       throw new Error('Real production was not scheduled for publishing');
@@ -2719,6 +2746,63 @@ class SystemTest {
     }
 
     this.logger.info('Agent loading test completed successfully');
+  }
+
+  async testSetupDefaultsPublishingDisabled() {
+    const fs = require('fs');
+    const path = require('path');
+    const source = fs.readFileSync(path.join(__dirname, 'setup.js'), 'utf8');
+    if (!source.includes('AUTO_PUBLISH_ENABLED=false')) throw new Error('New setup must default AUTO_PUBLISH_ENABLED to false');
+    if (source.includes('AUTO_PUBLISH_ENABLED=true')) throw new Error('New setup must not enable YouTube publishing by default');
+    this.logger.info('Setup publishing-default test completed successfully');
+  }
+
+  async testWalkthroughBlocksUnapprovedYouTubeSetup() {
+    const { SetupWalkthrough } = require('./walkthrough');
+    const inquirer = require('inquirer');
+    const walkthrough = new SetupWalkthrough();
+    const originalPrompt = inquirer.prompt;
+    const originalLog = console.log;
+    let prompted = false;
+    inquirer.prompt = async () => {
+      prompted = true;
+      return { action: 'connect' };
+    };
+    console.log = () => {};
+    try {
+      await walkthrough.stepYouTube();
+    } finally {
+      inquirer.prompt = originalPrompt;
+      console.log = originalLog;
+    }
+    if (prompted) throw new Error('Walkthrough prompted for YouTube project or credentials while compliance gate was blocked');
+    this.logger.info('Walkthrough fail-closed YouTube setup test completed successfully');
+  }
+
+  async testLegacyOAuthEntryPointsRespectComplianceGate() {
+    const { OAuthServer } = require('./oauth-server');
+    const { ModernAuth } = require('./modern-auth');
+    const oauth = new OAuthServer();
+    const modern = new ModernAuth();
+
+    const expectBlocked = async (label, action) => {
+      let blocked = false;
+      try {
+        await action();
+      } catch (error) {
+        blocked = error.code === 'YOUTUBE_COMPLIANCE_GATE_BLOCKED' && error.status === 409;
+      }
+      if (!blocked) throw new Error(label + ' bypassed the default-closed YouTube compliance gate');
+    };
+
+    await expectBlocked('OAuthServer.start', () => oauth.start());
+    await expectBlocked('OAuthServer.generateAuthUrl', () => oauth.generateAuthUrl());
+    await expectBlocked('OAuthServer.exchangeCodeForTokens', () => oauth.exchangeCodeForTokens('not-a-real-code'));
+    await expectBlocked('ModernAuth.authenticate', () => modern.authenticate());
+    await expectBlocked('ModernAuth.startTempServer', () => modern.startTempServer(0, {}));
+    await expectBlocked('ModernAuth.testAuthentication', () => modern.testAuthentication());
+
+    this.logger.info('Legacy OAuth entry-point compliance-gate test completed successfully');
   }
 
   async testYouTubeScopeDetection() {
