@@ -28,6 +28,14 @@ function approvedConfig() {
   config.controls.projectProvisioningAllowed = true;
   config.controls.credentialProvisioningAllowed = true;
   config.controls.publishingAllowed = true;
+  config.oauthScopes = {
+    ...config.oauthScopes,
+    approved: [...config.oauthScopes.requested],
+    reviewStatus: 'approved',
+    reviewedBy: 'test-fixture',
+    reviewedAt: '2026-11-17T00:00:00.000Z',
+    evidenceRef: 'test:least-privilege-review'
+  };
   return config;
 }
 
@@ -76,6 +84,30 @@ test('OAuth client ID must belong to the one mapped API Project', () => {
   const config = approvedConfig();
   config.apiProject.oauthClientId = 'different-oauth-client';
   assert.ok(getYouTubeComplianceState(config).blockers.some(item => item.includes('does not match')));
+});
+
+test('pending or undocumented least-privilege OAuth scope review blocks API access', () => {
+  const config = approvedConfig();
+  config.oauthScopes.reviewStatus = 'pending_least_privilege_review';
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('least-privilege OAuth scope review')));
+});
+
+test('requested OAuth scopes must exactly match the reviewed approved scope set', () => {
+  const config = approvedConfig();
+  config.oauthScopes.approved = config.oauthScopes.approved.filter(scope => !scope.endsWith('youtube.force-ssl'));
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('do not exactly match')));
+});
+
+test('duplicate or empty OAuth scopes are rejected', () => {
+  const config = approvedConfig();
+  config.oauthScopes.requested.push(config.oauthScopes.requested[0]);
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('non-empty, unique list')));
 });
 
 test('Made for Kids declaration must be an explicit boolean for every video', () => {
