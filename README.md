@@ -275,7 +275,7 @@ Long-form productions use hybrid assembly: Lumen generates bounded provider clip
 
 YouTube API access is **disabled by default**. Do not create a Google Cloud API Project, OAuth client, credentials, or user authorization until the actual AgentTube API Client boundary review, child-directed assessment, required compliance audit/approval, and exclusive one-project mapping are documented and the local compliance gate is explicitly approved.
 
-The current gate is in `config/youtube-api-client-compliance.json` and is intentionally blocked. AgentTube is one software product across its account/workspace processes; do not create one API Project per channel or account, share its project with a distinct API Client, or create projects to multiply quota. Account-local user tokens remain isolated.
+The current gate is in `config/youtube-api-client-compliance.json` and is intentionally blocked. Source describes one creator-automation application across isolated account/workspace processes, but the deployed API Client boundary remains pending review. Do not create one API Project per channel or account, share a project with a distinct API Client, or create projects to multiply quota. A central cross-client project-uniqueness review with evidence is also required. Account-local user tokens remain isolated.
 
 Before any future OAuth setup, review [YouTube API Client compliance](docs/YOUTUBE-API-CLIENT-COMPLIANCE.md). The credential setup command will fail closed while the gate is blocked.
 
