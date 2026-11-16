@@ -23,7 +23,9 @@ function approvedConfig() {
     oauthClientId: 'agenttube-oauth-client',
     ownerApiClientId: config.apiClient.id,
     credentialsExclusiveToClient: true,
-    projectCountForClient: 1
+    projectCountForClient: 1,
+    crossClientUniquenessReviewStatus: 'approved',
+    crossClientUniquenessEvidenceRef: 'test:cross-client-project-uniqueness'
   };
   config.controls.projectProvisioningAllowed = true;
   config.controls.credentialProvisioningAllowed = true;
@@ -72,6 +74,15 @@ test('approved non-child-directed API Client requires exactly one exclusive proj
   assert.equal(getYouTubeComplianceState(config).allowed, true);
   config.apiProject.projectCountForClient = 2;
   assert.ok(getYouTubeComplianceState(config).blockers.some(item => item.includes('exactly one API Project')));
+});
+
+test('central cross-client API Project uniqueness review is required', () => {
+  const config = approvedConfig();
+  config.apiProject.crossClientUniquenessReviewStatus = 'not_started';
+  config.apiProject.crossClientUniquenessEvidenceRef = null;
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('cross-client API Project uniqueness review')));
 });
 
 test('API Project cannot be shared with or owned by another API Client', () => {
