@@ -63,6 +63,7 @@ class SystemTest {
       { name: 'YouTube Scope Detection', test: () => this.testYouTubeScopeDetection() },
       { name: 'Legacy OAuth Entry Points Respect Compliance Gate', test: () => this.testLegacyOAuthEntryPointsRespectComplianceGate() },
       { name: 'Walkthrough Does Not Prompt for Unapproved YouTube Projects', test: () => this.testWalkthroughBlocksUnapprovedYouTubeSetup() },
+      { name: 'Setup Defaults YouTube Publishing to Disabled', test: () => this.testSetupDefaultsPublishingDisabled() },
       { name: 'Audience Comment Sync', test: () => this.testAudienceCommentSync() },
       { name: 'Audience Comment Analysis', test: () => this.testAudienceCommentAnalysis() },
       { name: 'Audience Idea Mining', test: () => this.testAudienceIdeaMining() },
@@ -2745,6 +2746,15 @@ class SystemTest {
     }
 
     this.logger.info('Agent loading test completed successfully');
+  }
+
+  async testSetupDefaultsPublishingDisabled() {
+    const fs = require('fs');
+    const path = require('path');
+    const source = fs.readFileSync(path.join(__dirname, 'setup.js'), 'utf8');
+    if (!source.includes('AUTO_PUBLISH_ENABLED=false')) throw new Error('New setup must default AUTO_PUBLISH_ENABLED to false');
+    if (source.includes('AUTO_PUBLISH_ENABLED=true')) throw new Error('New setup must not enable YouTube publishing by default');
+    this.logger.info('Setup publishing-default test completed successfully');
   }
 
   async testWalkthroughBlocksUnapprovedYouTubeSetup() {
