@@ -49,7 +49,9 @@
     "oauthClientId": null,
     "ownerApiClientId": null,
     "credentialsExclusiveToClient": false,
-    "projectCountForClient": 0
+    "projectCountForClient": 0,
+    "crossClientUniquenessReviewStatus": "not_started",
+    "crossClientUniquenessEvidenceRef": null
   },
   "oauthScopes": {
     "requested": [
