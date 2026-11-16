@@ -50,6 +50,10 @@ function getYouTubeComplianceState(config) {
     if (project.projectCountForClient !== 1) blockers.push('this API Client must map to exactly one API Project');
     if (project.ownerApiClientId !== client.id) blockers.push('API Project owner does not match this API Client');
     if (project.credentialsExclusiveToClient !== true) blockers.push('API credentials are not documented as exclusive to this API Client');
+    if (project.crossClientUniquenessReviewStatus !== 'approved' ||
+        typeof project.crossClientUniquenessEvidenceRef !== 'string' || !project.crossClientUniquenessEvidenceRef.trim()) {
+      blockers.push('central cross-client API Project uniqueness review is not approved with evidence');
+    }
     if (typeof project.oauthClientId !== 'string' || !project.oauthClientId.trim()) blockers.push('approved OAuth client ID is missing from the API Project mapping');
     if (client.oauthClientId !== project.oauthClientId) blockers.push('API Client OAuth client ID does not match its exclusive API Project');
   } else if (client.needsCredentials === false) {
