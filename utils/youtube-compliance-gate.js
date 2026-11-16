@@ -33,6 +33,7 @@ function getYouTubeComplianceState(config) {
   const project = current.apiProject || {};
   const controls = current.controls || {};
   const namespaces = current.tokenNamespaces || {};
+  const oauthScopes = current.oauthScopes || {};
 
   if (current.schemaVersion !== 1) blockers.push('compliance configuration schema version must equal 1');
   if (typeof client.id !== 'string' || !client.id.trim()) blockers.push('actual API Client identity is missing');
@@ -66,6 +67,26 @@ function getYouTubeComplianceState(config) {
   if (typeof namespaces.pattern !== 'string' || !namespaces.pattern.includes('<accountId>') || namespaces.perAccountIsolated !== true || namespaces.crossAccountTokenReuseAllowed !== false || namespaces.apiProjectCountIndependent !== true) {
     blockers.push('per-account OAuth token isolation is not documented independently of API Project count');
   }
+  const requestedScopes = Array.isArray(oauthScopes.requested) ? oauthScopes.requested : [];
+  const approvedScopes = Array.isArray(oauthScopes.approved) ? oauthScopes.approved : [];
+  const validScopeList = list => list.length > 0 &&
+    list.every(scope => typeof scope === 'string' &&
+      scope.startsWith('https://www.googleapis.com/auth/') &&
+      !/\s/.test(scope)) &&
+    new Set(list).size === list.length;
+  if (!validScopeList(requestedScopes)) blockers.push('requested OAuth scopes must be a non-empty, unique list of valid Google API scopes');
+  if (!validScopeList(approvedScopes)) blockers.push('approved OAuth scopes must be a non-empty, unique list of valid Google API scopes');
+  if (oauthScopes.reviewStatus !== 'approved' ||
+      typeof oauthScopes.reviewedBy !== 'string' || !oauthScopes.reviewedBy.trim() ||
+      !Number.isFinite(new Date(oauthScopes.reviewedAt).getTime()) ||
+      typeof oauthScopes.evidenceRef !== 'string' || !oauthScopes.evidenceRef.trim()) {
+    blockers.push('least-privilege OAuth scope review is not approved with reviewer, date, and evidence');
+  }
+  if (validScopeList(requestedScopes) && validScopeList(approvedScopes) &&
+      JSON.stringify([...requestedScopes].sort()) !== JSON.stringify([...approvedScopes].sort())) {
+    blockers.push('requested OAuth scopes do not exactly match the reviewed approved scope set');
+  }
+
   if (child.status === 'no' && (!Array.isArray(child.evidenceRefs) || child.evidenceRefs.length === 0)) {
     blockers.push('a not-child-directed assessment requires supporting evidence');
   }
