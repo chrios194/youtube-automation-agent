@@ -9,6 +9,9 @@ const REQUIRED_API_DATA_POLICY = Object.freeze({
   otherAuthorizedApiDataMaxStorageDays: 30,
   nonAuthorizedApiDataMaxStorageDays: 30,
   analyticsReportingAuthorizationRecheckDays: 30,
+  analyticsReportingVideoExistenceRecheckDays: 30,
+  analyticsReportingStatisticsRetentionExceptionRequiresActiveUserConsent: true,
+  authorizedAnalyticsReportingDataStorage: 'as_needed_with_30_day_authorization_and_video_existence_recheck',
   userDeletionWithinDays: 7,
   clientRevocationDeletionWithinDays: 7,
   googleSettingsRevocationDeletionWithinDays: 30,
@@ -17,12 +20,24 @@ const REQUIRED_API_DATA_POLICY = Object.freeze({
   authorizedDataVisibilityScope: 'authorizing_user_and_user_approved_agents_only',
   crossAccountApiDataAggregationAllowed: false,
   crossContentOwnerApiDataAggregationAllowed: false,
-  derivedMetricsFromApiDataAllowedWithoutExplicitAuditPermission: false
+  derivedMetricsFromApiDataAllowedWithoutExplicitAuditPermission: false,
+  unofficialYouTubeScrapingAllowed: false,
+  undocumentedYouTubeApplicationEndpointsAllowed: false,
+  youtubeiJsInnertubeAllowed: false,
+  captionsListReturnsMetadataOnly: true,
+  captionsDownloadRequiresVideoEditPermission: true,
+  captionsDownloadIsGeneralPublicTranscriptSource: false,
+  analyticsReportingAuthorizationRecheckExecutionRequired: true,
+  analyticsReportingVideoExistenceRecheckExecutionRequired: true,
+  clientRevocationDeletionEndToEndVerificationRequired: true,
+  clientRevocationTokenImmediateVerificationRequired: true
 });
 
 const REQUIRED_API_DATA_VERIFICATION = Object.freeze({
   storageInventoryStatus: 'verified',
   retentionJobStatus: 'deployed_and_execution_verified',
+  analyticsReportingAuthorizationRecheckStatus: 'deployed_and_execution_verified',
+  analyticsReportingVideoExistenceRecheckStatus: 'deployed_and_execution_verified',
   userDeletionStatus: 'end_to_end_verified',
   clientRevocationDeletionStatus: 'end_to_end_verified',
   clientRevocationTokenStatus: 'immediate_revocation_verified',
@@ -35,6 +50,8 @@ const REQUIRED_API_DATA_EVIDENCE = Object.freeze([
   'deployedCommitSha',
   'storageInventoryEvidenceRef',
   'retentionJobEvidenceRef',
+  'analyticsReportingAuthorizationRecheckEvidenceRef',
+  'analyticsReportingVideoExistenceRecheckEvidenceRef',
   'userDeletionEvidenceRef',
   'clientRevocationDeletionEvidenceRef',
   'clientRevocationTokenEvidenceRef',
@@ -57,6 +74,8 @@ function getApiDataHandlingBlockers(apiDataHandling, now = new Date()) {
   for (const [field, expected] of Object.entries(REQUIRED_API_DATA_POLICY)) {
     if (policy[field] !== expected) blockers.push('API Data handling policy is not compliant for ' + field);
   }
+  if (policy.apiDataCollectionAllowed !== true) blockers.push('YouTube API Data collection is not approved');
+  if (policy.apiDataStorageAllowed !== true) blockers.push('YouTube API Data storage is not approved');
 
   const verification = apiDataHandling.verification;
   if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
@@ -160,6 +179,21 @@ function getYouTubeComplianceState(config, options = {}) {
     blockers.push('required compliance audit or reasoned not-required determination is not documented');
   }
   blockers.push(...getApiDataHandlingBlockers(current.apiDataHandling, now));
+  const dataAccessReview = current.apiDataAccessReview || {};
+  if (dataAccessReview.status !== 'approved') blockers.push('YouTube API data-access method review is not approved');
+  for (const [field, expected] of Object.entries({
+    unofficialYouTubeScrapingUsed: false,
+    undocumentedYouTubeApplicationEndpointsUsed: false,
+    youtubeiJsInnertubeUsed: false,
+    captionsListReturnsMetadataOnly: true,
+    captionsDownloadRequiresVideoEditPermission: true,
+    captionsDownloadIsGeneralPublicTranscriptSource: false
+  })) {
+    if (dataAccessReview[field] !== expected) blockers.push('YouTube API data-access method review is not compliant for ' + field);
+  }
+  if (typeof dataAccessReview.evidenceRef !== 'string' || !dataAccessReview.evidenceRef.trim()) blockers.push('YouTube API data-access method review evidence is missing');
+  if (dataAccessReview.reviewedCommitSha !== current.apiDataHandling?.verification?.deployedCommitSha) blockers.push('YouTube API data-access method review does not match the exact deployed commit');
+  if (!timezoneQualified(dataAccessReview.reviewedAt)) blockers.push('YouTube API data-access method review requires a timezone-qualified timestamp');
 
   if (client.needsCredentials === true) {
     if (typeof project.projectId !== 'string' || !project.projectId.trim()) blockers.push('exactly one API Project has not been assigned to this API Client');
