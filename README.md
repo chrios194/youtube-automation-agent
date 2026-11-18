@@ -627,3 +627,8 @@ npm run workspace:start
 ```
 
 The workspace launcher enables strict account mode and requires an `API_KEY` in every account environment file. It intentionally supports up to 12 account processes per workspace; run multiple independent workspaces as the portfolio grows. Read [`docs/multi-account-workspaces.md`](docs/multi-account-workspaces.md) for the account-isolation model, manifest contract, deployment boundaries, and incident guidance.
+
+
+## YouTube publisher API Data handling — 2026-11-19
+
+API Data collection/storage remain disabled pending source review and deployed retention/deletion verification. No unofficial scraping or undocumented endpoints are allowed; cross-channel aggregation remains disabled. See docs/YOUTUBE-API-DATA-HANDLING-2026-11-19.md.
