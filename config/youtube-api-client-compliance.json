@@ -101,7 +101,11 @@
       "analyticsReportingAuthorizationRecheckExecutionRequired": true,
       "analyticsReportingVideoExistenceRecheckExecutionRequired": true,
       "clientRevocationDeletionEndToEndVerificationRequired": true,
-      "clientRevocationTokenImmediateVerificationRequired": true
+      "clientRevocationTokenImmediateVerificationRequired": true,
+      "crossChannelApiDataAggregationAllowed": false,
+      "centralDashboardApiDataAggregationAllowed": false,
+      "centralDashboardApiDataVisibility": "none",
+      "centralDashboardOperationalMetadataOnly": true
     },
     "verification": {
       "storageInventoryStatus": "not_verified",
