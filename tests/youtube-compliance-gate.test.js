@@ -224,13 +224,13 @@ test('cross-account API Data aggregation must be verified disabled', () => {
 
 test('API Data deployment evidence must be fresh and cannot be future-dated', () => {
   const config = approvedConfig();
-  const now = new Date('2026-11-18T00:00:00.000Z');
-  config.apiDataHandling.verification.verifiedAt = '2026-10-17T00:00:00.000Z';
+  const now = new Date();
+  config.apiDataHandling.verification.verifiedAt = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString();
   const stale = getYouTubeComplianceState(config, { now });
   assert.equal(stale.allowed, false);
   assert.ok(stale.blockers.some(item => item.includes('older than the 30-day internal evidence refresh window')));
 
-  config.apiDataHandling.verification.verifiedAt = '2026-11-19T00:00:00.000Z';
+  config.apiDataHandling.verification.verifiedAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
   const future = getYouTubeComplianceState(config, { now });
   assert.equal(future.allowed, false);
   assert.ok(future.blockers.some(item => item.includes('timestamp is in the future')));
