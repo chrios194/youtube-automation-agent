@@ -52,13 +52,17 @@ function approvedConfig() {
   };
   config.apiDataHandling = {
     status: 'approved',
-    policy: { ...REQUIRED_API_DATA_POLICY },
+    policy: { ...REQUIRED_API_DATA_POLICY, apiDataCollectionAllowed: true, apiDataStorageAllowed: true },
     verification: {
       ...REQUIRED_API_DATA_VERIFICATION,
       deployedEnvironmentRef: 'test:production-environment',
       deployedCommitSha: 'a'.repeat(40),
       storageInventoryEvidenceRef: 'test:storage-inventory',
       retentionJobEvidenceRef: 'test:retention-job',
+      analyticsReportingAuthorizationRecheckStatus: 'deployed_and_execution_verified',
+      analyticsReportingAuthorizationRecheckEvidenceRef: 'test:analytics-auth-recheck',
+      analyticsReportingVideoExistenceRecheckStatus: 'deployed_and_execution_verified',
+      analyticsReportingVideoExistenceRecheckEvidenceRef: 'test:analytics-video-existence-recheck',
       userDeletionEvidenceRef: 'test:user-deletion',
       clientRevocationDeletionEvidenceRef: 'test:client-revocation-deletion',
       clientRevocationTokenEvidenceRef: 'test:client-token-revocation',
@@ -66,6 +70,18 @@ function approvedConfig() {
       crossAccountAggregationEvidenceRef: 'test:cross-account-disabled',
       verifiedAt: new Date().toISOString()
     }
+  };
+  config.apiDataAccessReview = {
+    status: 'approved',
+    unofficialYouTubeScrapingUsed: false,
+    undocumentedYouTubeApplicationEndpointsUsed: false,
+    youtubeiJsInnertubeUsed: false,
+    captionsListReturnsMetadataOnly: true,
+    captionsDownloadRequiresVideoEditPermission: true,
+    captionsDownloadIsGeneralPublicTranscriptSource: false,
+    reviewedCommitSha: 'a'.repeat(40),
+    evidenceRef: 'test:youtube-data-access-method-review',
+    reviewedAt: new Date().toISOString()
   };
   return config;
 }
@@ -251,4 +267,57 @@ test('boundary review requires at least three source evidence references', () =>
   const state = getYouTubeComplianceState(config);
   assert.equal(state.allowed, false);
   assert.ok(state.blockers.some(item => item.includes('at least three source evidence references')));
+});
+
+
+test('unofficial scraping, undocumented YouTube Application endpoints, and Innertube block API access', () => {
+  for (const field of ['unofficialYouTubeScrapingUsed', 'undocumentedYouTubeApplicationEndpointsUsed', 'youtubeiJsInnertubeUsed']) {
+    const config = approvedConfig();
+    config.apiDataAccessReview[field] = true;
+    const state = getYouTubeComplianceState(config);
+    assert.equal(state.allowed, false);
+    assert.ok(state.blockers.some(item => item.includes('YouTube API data-access method review is not compliant for ' + field)));
+  }
+});
+
+test('YouTube API data-access method review must match the deployed commit and carry evidence', () => {
+  const config = approvedConfig();
+  config.apiDataAccessReview.reviewedCommitSha = 'b'.repeat(40);
+  let state = getYouTubeComplianceState(config);
+  assert.ok(state.blockers.some(item => item.includes('does not match the exact deployed commit')));
+  config.apiDataAccessReview.reviewedCommitSha = 'a'.repeat(40);
+  config.apiDataAccessReview.evidenceRef = '';
+  state = getYouTubeComplianceState(config);
+  assert.ok(state.blockers.some(item => item.includes('evidence is missing')));
+});
+
+test('official captions endpoints are not a general public-video transcript source', () => {
+  const config = approvedConfig();
+  config.apiDataAccessReview.captionsDownloadIsGeneralPublicTranscriptSource = true;
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('captionsDownloadIsGeneralPublicTranscriptSource')));
+});
+
+test('API Data collection and storage must be explicitly approved', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.policy.apiDataCollectionAllowed = false;
+  let state = getYouTubeComplianceState(config);
+  assert.ok(state.blockers.includes('YouTube API Data collection is not approved'));
+  config.apiDataHandling.policy.apiDataCollectionAllowed = true;
+  config.apiDataHandling.policy.apiDataStorageAllowed = false;
+  state = getYouTubeComplianceState(config);
+  assert.ok(state.blockers.includes('YouTube API Data storage is not approved'));
+});
+
+test('Analytics/Reporting statistics exception requires active consent and 30-day auth/video rechecks', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.policy.analyticsReportingStatisticsRetentionExceptionRequiresActiveUserConsent = false;
+  config.apiDataHandling.policy.analyticsReportingVideoExistenceRecheckDays = 31;
+  config.apiDataHandling.verification.analyticsReportingVideoExistenceRecheckStatus = 'not_verified';
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('analyticsReportingStatisticsRetentionExceptionRequiresActiveUserConsent')));
+  assert.ok(state.blockers.some(item => item.includes('analyticsReportingVideoExistenceRecheckDays')));
+  assert.ok(state.blockers.some(item => item.includes('analyticsReportingVideoExistenceRecheckStatus')));
 });
