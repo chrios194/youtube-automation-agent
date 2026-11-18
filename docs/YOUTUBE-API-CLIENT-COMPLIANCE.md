@@ -78,3 +78,22 @@ No API Project was created, no OAuth client ID/secret or user token was entered,
 ## 7. Cross-client project uniqueness
 
 Before access can be enabled, the central AIOS API Client registry must record the assigned project and an evidence-backed cross-client uniqueness review. The project ID and OAuth client must not appear in another API Client's mapping. The local gate requires `crossClientUniquenessReviewStatus=approved` and a non-empty evidence reference. The current value is `not_started`, so the gate remains blocked.
+
+
+## 8. API Data retention, deletion, and deployment evidence
+
+API access, storage, OAuth setup, and publishing remain blocked until the deployed application proves these controls for its exact environment and commit:
+
+- Other Authorized API Data and Non-Authorized API Data are refreshed or deleted within 30 calendar days, subject to the narrower policy exceptions for Analytics/Reporting data and specified statistics; those exceptions require authorization and video-existence rechecks at least every 30 days.
+- A user-requested deletion or account deletion is completed as soon as possible and within seven calendar days.
+- Revocation through this API Client immediately revokes the token and deletes related Authorized Data as soon as possible and within seven calendar days.
+- Revocation through Google's Security Settings is detected through periodic token revalidation; related API Data is deleted as soon as possible and within 30 calendar days.
+- Authorized Data is visible only to the authorizing user and agents expressly approved by that user.
+- Cross-account and cross-content-owner API Data aggregation remains disabled. Account-local tokens, queues, databases, storage, analytics, approvals, and business resources remain isolated.
+- Derived metrics based on API Data remain disabled unless the applicable explicit audit permission is documented.
+
+The compliance gate requires a deployed storage inventory, an execution-verified retention job, end-to-end user deletion, end-to-end API Client revocation/token deletion, end-to-end Google Security Settings revocation deletion, and verified-disabled cross-account aggregation. Each control must carry a separate evidence reference, the exact deployed environment, the 40-character deployed commit SHA, and a timezone-qualified verification timestamp.
+
+Evidence older than 30 days or dated in the future is rejected by the internal gate. This is an internal evidence-refresh requirement, not a change to Google's API Data retention deadlines. The default configuration intentionally records all deployment controls as unverified; no self-declared approval or environment-variable bypass is accepted.
+
+Official policy: https://developers.google.com/youtube/terms/developer-policies/ (Sections III.C and III.E).
