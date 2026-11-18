@@ -86,7 +86,22 @@
       "authorizedDataVisibilityScope": "authorizing_user_and_user_approved_agents_only",
       "crossAccountApiDataAggregationAllowed": false,
       "crossContentOwnerApiDataAggregationAllowed": false,
-      "derivedMetricsFromApiDataAllowedWithoutExplicitAuditPermission": false
+      "derivedMetricsFromApiDataAllowedWithoutExplicitAuditPermission": false,
+      "apiDataCollectionAllowed": false,
+      "apiDataStorageAllowed": false,
+      "analyticsReportingVideoExistenceRecheckDays": 30,
+      "analyticsReportingStatisticsRetentionExceptionRequiresActiveUserConsent": true,
+      "authorizedAnalyticsReportingDataStorage": "as_needed_with_30_day_authorization_and_video_existence_recheck",
+      "unofficialYouTubeScrapingAllowed": false,
+      "undocumentedYouTubeApplicationEndpointsAllowed": false,
+      "youtubeiJsInnertubeAllowed": false,
+      "captionsListReturnsMetadataOnly": true,
+      "captionsDownloadRequiresVideoEditPermission": true,
+      "captionsDownloadIsGeneralPublicTranscriptSource": false,
+      "analyticsReportingAuthorizationRecheckExecutionRequired": true,
+      "analyticsReportingVideoExistenceRecheckExecutionRequired": true,
+      "clientRevocationDeletionEndToEndVerificationRequired": true,
+      "clientRevocationTokenImmediateVerificationRequired": true
     },
     "verification": {
       "storageInventoryStatus": "not_verified",
@@ -105,7 +120,11 @@
       "clientRevocationTokenEvidenceRef": null,
       "googleSettingsRevocationDeletionEvidenceRef": null,
       "crossAccountAggregationEvidenceRef": null,
-      "verifiedAt": null
+      "verifiedAt": null,
+      "analyticsReportingAuthorizationRecheckStatus": "not_verified",
+      "analyticsReportingAuthorizationRecheckEvidenceRef": null,
+      "analyticsReportingVideoExistenceRecheckStatus": "not_verified",
+      "analyticsReportingVideoExistenceRecheckEvidenceRef": null
     }
   },
   "controls": {
@@ -115,5 +134,17 @@
     "quotaShardingAllowed": false,
     "perChannelProjectCreationAllowed": false,
     "madeForKidsDeclarationRequiredPerVideo": true
+  },
+  "apiDataAccessReview": {
+    "status": "not_reviewed",
+    "unofficialYouTubeScrapingUsed": null,
+    "undocumentedYouTubeApplicationEndpointsUsed": null,
+    "youtubeiJsInnertubeUsed": null,
+    "captionsListReturnsMetadataOnly": null,
+    "captionsDownloadRequiresVideoEditPermission": null,
+    "captionsDownloadIsGeneralPublicTranscriptSource": null,
+    "reviewedCommitSha": null,
+    "evidenceRef": null,
+    "reviewedAt": null
   }
 }
