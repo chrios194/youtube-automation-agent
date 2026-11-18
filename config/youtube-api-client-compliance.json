@@ -72,6 +72,42 @@
     "crossAccountTokenReuseAllowed": false,
     "apiProjectCountIndependent": true
   },
+  "apiDataHandling": {
+    "status": "not_approved",
+    "policy": {
+      "otherAuthorizedApiDataMaxStorageDays": 30,
+      "nonAuthorizedApiDataMaxStorageDays": 30,
+      "analyticsReportingAuthorizationRecheckDays": 30,
+      "userDeletionWithinDays": 7,
+      "clientRevocationDeletionWithinDays": 7,
+      "googleSettingsRevocationDeletionWithinDays": 30,
+      "tokenRevocationImmediateOnClientRevocation": true,
+      "userDeletionRequestMechanismRequired": true,
+      "authorizedDataVisibilityScope": "authorizing_user_and_user_approved_agents_only",
+      "crossAccountApiDataAggregationAllowed": false,
+      "crossContentOwnerApiDataAggregationAllowed": false,
+      "derivedMetricsFromApiDataAllowedWithoutExplicitAuditPermission": false
+    },
+    "verification": {
+      "storageInventoryStatus": "not_verified",
+      "retentionJobStatus": "not_verified",
+      "userDeletionStatus": "not_verified",
+      "clientRevocationDeletionStatus": "not_verified",
+      "clientRevocationTokenStatus": "not_verified",
+      "googleSettingsRevocationDeletionStatus": "not_verified",
+      "crossAccountAggregationStatus": "not_verified",
+      "deployedEnvironmentRef": null,
+      "deployedCommitSha": null,
+      "storageInventoryEvidenceRef": null,
+      "retentionJobEvidenceRef": null,
+      "userDeletionEvidenceRef": null,
+      "clientRevocationDeletionEvidenceRef": null,
+      "clientRevocationTokenEvidenceRef": null,
+      "googleSettingsRevocationDeletionEvidenceRef": null,
+      "crossAccountAggregationEvidenceRef": null,
+      "verifiedAt": null
+    }
+  },
   "controls": {
     "projectProvisioningAllowed": false,
     "credentialProvisioningAllowed": false,
