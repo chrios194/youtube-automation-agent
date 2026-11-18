@@ -5,12 +5,107 @@ const path = require('path');
 
 const DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config', 'youtube-api-client-compliance.json');
 
+const REQUIRED_API_DATA_POLICY = Object.freeze({
+  otherAuthorizedApiDataMaxStorageDays: 30,
+  nonAuthorizedApiDataMaxStorageDays: 30,
+  analyticsReportingAuthorizationRecheckDays: 30,
+  userDeletionWithinDays: 7,
+  clientRevocationDeletionWithinDays: 7,
+  googleSettingsRevocationDeletionWithinDays: 30,
+  tokenRevocationImmediateOnClientRevocation: true,
+  userDeletionRequestMechanismRequired: true,
+  authorizedDataVisibilityScope: 'authorizing_user_and_user_approved_agents_only',
+  crossAccountApiDataAggregationAllowed: false,
+  crossContentOwnerApiDataAggregationAllowed: false,
+  derivedMetricsFromApiDataAllowedWithoutExplicitAuditPermission: false
+});
+
+const REQUIRED_API_DATA_VERIFICATION = Object.freeze({
+  storageInventoryStatus: 'verified',
+  retentionJobStatus: 'deployed_and_execution_verified',
+  userDeletionStatus: 'end_to_end_verified',
+  clientRevocationDeletionStatus: 'end_to_end_verified',
+  clientRevocationTokenStatus: 'immediate_revocation_verified',
+  googleSettingsRevocationDeletionStatus: 'end_to_end_verified',
+  crossAccountAggregationStatus: 'verified_disabled'
+});
+
+const REQUIRED_API_DATA_EVIDENCE = Object.freeze([
+  'deployedEnvironmentRef',
+  'deployedCommitSha',
+  'storageInventoryEvidenceRef',
+  'retentionJobEvidenceRef',
+  'userDeletionEvidenceRef',
+  'clientRevocationDeletionEvidenceRef',
+  'clientRevocationTokenEvidenceRef',
+  'googleSettingsRevocationDeletionEvidenceRef',
+  'crossAccountAggregationEvidenceRef',
+  'verifiedAt'
+]);
+
+function getApiDataHandlingBlockers(apiDataHandling, now = new Date()) {
+  if (!apiDataHandling || typeof apiDataHandling !== 'object' || Array.isArray(apiDataHandling)) {
+    return ['deployed API Data handling policy and verification evidence are missing'];
+  }
+
+  const blockers = [];
+  if (apiDataHandling.status !== 'approved') {
+    blockers.push('API Data handling controls are not approved');
+  }
+
+  const policy = apiDataHandling.policy || {};
+  for (const [field, expected] of Object.entries(REQUIRED_API_DATA_POLICY)) {
+    if (policy[field] !== expected) blockers.push('API Data handling policy is not compliant for ' + field);
+  }
+
+  const verification = apiDataHandling.verification;
+  if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
+    blockers.push('deployed API Data handling verification evidence is missing');
+    return blockers;
+  }
+
+  for (const [field, expected] of Object.entries(REQUIRED_API_DATA_VERIFICATION)) {
+    if (verification[field] !== expected) {
+      blockers.push('API Data deployment verification is incomplete for ' + field);
+    }
+  }
+  for (const field of REQUIRED_API_DATA_EVIDENCE) {
+    if (typeof verification[field] !== 'string' || !verification[field].trim()) {
+      blockers.push('API Data deployment verification evidence is missing for ' + field);
+    }
+  }
+
+  if (typeof verification.deployedCommitSha !== 'string' || !/^[a-f0-9]{40}$/.test(verification.deployedCommitSha)) {
+    blockers.push('API Data verification requires the exact deployed 40-character commit SHA');
+  }
+
+  const verifiedAt = verification.verifiedAt;
+  if (typeof verifiedAt !== 'string' ||
+      !Number.isFinite(Date.parse(verifiedAt)) ||
+      !(verifiedAt.endsWith('Z') || /[+-][0-9]{2}:[0-9]{2}$/.test(verifiedAt))) {
+    blockers.push('API Data verification requires a timezone-qualified timestamp');
+  } else {
+    const verifiedAtMs = Date.parse(verifiedAt);
+    const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
+    if (!Number.isFinite(nowMs)) {
+      blockers.push('API Data verification clock is invalid');
+    } else if (verifiedAtMs > nowMs + 60_000) {
+      blockers.push('API Data verification timestamp is in the future');
+    } else if (nowMs - verifiedAtMs > 30 * 24 * 60 * 60 * 1000) {
+      blockers.push('API Data verification is older than the 30-day internal evidence refresh window');
+    }
+  }
+
+  return blockers;
+}
+
 function loadYouTubeComplianceConfig(filePath = DEFAULT_CONFIG_PATH) {
   const resolved = path.resolve(filePath);
   return JSON.parse(fs.readFileSync(resolved, 'utf8'));
 }
 
-function getYouTubeComplianceState(config) {
+function getYouTubeComplianceState(config, options = {}) {
+  const now = options.now || new Date();
   const blockers = [];
   let current = config;
 
@@ -38,12 +133,33 @@ function getYouTubeComplianceState(config) {
   if (current.schemaVersion !== 1) blockers.push('compliance configuration schema version must equal 1');
   if (typeof client.id !== 'string' || !client.id.trim()) blockers.push('actual API Client identity is missing');
   if (client.boundaryStatus !== 'approved' || boundary.status !== 'approved') blockers.push('actual API Client boundary review is not approved');
-  if (!Array.isArray(boundary.evidenceRefs) || boundary.evidenceRefs.length === 0) blockers.push('actual API Client boundary evidence is missing');
+  if (!Array.isArray(boundary.evidenceRefs) || boundary.evidenceRefs.filter(value => typeof value === 'string' && value.trim()).length < 3) {
+    blockers.push('actual API Client boundary review requires at least three source evidence references');
+  }
+  const timezoneQualified = value =>
+    typeof value === 'string' &&
+    Number.isFinite(Date.parse(value)) &&
+    (value.endsWith('Z') || /[+-][0-9]{2}:[0-9]{2}$/.test(value));
+  const hasRefs = (value, minimum) =>
+    Array.isArray(value) && value.filter(item => typeof item === 'string' && item.trim()).length >= minimum;
   if (!['yes', 'no'].includes(child.status)) blockers.push('child-directed status has not been assessed as yes or no');
+  if (child.assessmentStatus !== 'final' ||
+      child.finalStatus !== child.status ||
+      typeof child.assessor !== 'string' || !child.assessor.trim() ||
+      !timezoneQualified(child.assessedAt) ||
+      typeof child.intendedAudienceEvidenceRef !== 'string' || !child.intendedAudienceEvidenceRef.trim() ||
+      !hasRefs(child.productSurfaceEvidenceRefs, 2) ||
+      !hasRefs(child.marketingEvidenceRefs, 1) ||
+      typeof child.audienceEvidenceRef !== 'string' || !child.audienceEvidenceRef.trim() ||
+      child.ownerAttestationStatus !== 'confirmed' ||
+      typeof child.ownerAttestationEvidenceRef !== 'string' || !child.ownerAttestationEvidenceRef.trim()) {
+    blockers.push('final child-directed assessment requires product, marketing, audience, and owner-attestation evidence');
+  }
   if (child.status === 'yes') blockers.push('child-directed API Clients cannot use this publishing client for YouTube write actions');
   if (!['approved', 'not_required'].includes(audit.status) || typeof audit.evidenceRef !== 'string' || !audit.evidenceRef.trim()) {
     blockers.push('required compliance audit or reasoned not-required determination is not documented');
   }
+  blockers.push(...getApiDataHandlingBlockers(current.apiDataHandling, now));
 
   if (client.needsCredentials === true) {
     if (typeof project.projectId !== 'string' || !project.projectId.trim()) blockers.push('exactly one API Project has not been assigned to this API Client');
@@ -99,7 +215,7 @@ function getYouTubeComplianceState(config) {
 }
 
 function assertYouTubeComplianceGate(action = 'YouTube API access', options = {}) {
-  const state = getYouTubeComplianceState(options.config);
+  const state = getYouTubeComplianceState(options.config, { now: options.now });
   if (!state.allowed) {
     const error = new Error(action + ' is blocked by the YouTube API Client compliance gate: ' + state.blockers.join('; '));
     error.status = 409;
@@ -122,6 +238,10 @@ function assertMadeForKidsDeclaration(value) {
 
 module.exports = {
   DEFAULT_CONFIG_PATH,
+  REQUIRED_API_DATA_POLICY,
+  REQUIRED_API_DATA_VERIFICATION,
+  REQUIRED_API_DATA_EVIDENCE,
+  getApiDataHandlingBlockers,
   loadYouTubeComplianceConfig,
   getYouTubeComplianceState,
   assertYouTubeComplianceGate,
