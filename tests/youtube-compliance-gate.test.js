@@ -6,7 +6,9 @@ const base = require('../config/youtube-api-client-compliance.json');
 const {
   getYouTubeComplianceState,
   assertYouTubeComplianceGate,
-  assertMadeForKidsDeclaration
+  assertMadeForKidsDeclaration,
+  REQUIRED_API_DATA_POLICY,
+  REQUIRED_API_DATA_VERIFICATION
 } = require('../utils/youtube-compliance-gate');
 
 function approvedConfig() {
@@ -15,6 +17,16 @@ function approvedConfig() {
   config.apiClient.oauthClientId = 'agenttube-oauth-client';
   config.boundaryReview.status = 'approved';
   config.childDirectedAssessment.status = 'no';
+  config.childDirectedAssessment.finalStatus = 'no';
+  config.childDirectedAssessment.assessmentStatus = 'final';
+  config.childDirectedAssessment.assessor = 'test-reviewer';
+  config.childDirectedAssessment.assessedAt = new Date().toISOString();
+  config.childDirectedAssessment.intendedAudienceEvidenceRef = 'review:intended-audience';
+  config.childDirectedAssessment.productSurfaceEvidenceRefs = ['review:dashboard', 'review:product-features'];
+  config.childDirectedAssessment.marketingEvidenceRefs = ['review:marketing'];
+  config.childDirectedAssessment.audienceEvidenceRef = 'review:audience';
+  config.childDirectedAssessment.ownerAttestationStatus = 'confirmed';
+  config.childDirectedAssessment.ownerAttestationEvidenceRef = 'review:owner-attestation';
   config.childDirectedAssessment.evidenceRefs = ['review:product-audience', 'review:dashboard-and-marketing'];
   config.complianceAudit.status = 'approved';
   config.complianceAudit.evidenceRef = 'audit:approved-review-2026-11-15';
@@ -37,6 +49,23 @@ function approvedConfig() {
     reviewedBy: 'test-fixture',
     reviewedAt: '2026-11-17T00:00:00.000Z',
     evidenceRef: 'test:least-privilege-review'
+  };
+  config.apiDataHandling = {
+    status: 'approved',
+    policy: { ...REQUIRED_API_DATA_POLICY },
+    verification: {
+      ...REQUIRED_API_DATA_VERIFICATION,
+      deployedEnvironmentRef: 'test:production-environment',
+      deployedCommitSha: 'a'.repeat(40),
+      storageInventoryEvidenceRef: 'test:storage-inventory',
+      retentionJobEvidenceRef: 'test:retention-job',
+      userDeletionEvidenceRef: 'test:user-deletion',
+      clientRevocationDeletionEvidenceRef: 'test:client-revocation-deletion',
+      clientRevocationTokenEvidenceRef: 'test:client-token-revocation',
+      googleSettingsRevocationDeletionEvidenceRef: 'test:google-settings-revocation',
+      crossAccountAggregationEvidenceRef: 'test:cross-account-disabled',
+      verifiedAt: new Date().toISOString()
+    }
   };
   return config;
 }
@@ -130,4 +159,96 @@ test('Made for Kids declaration must be an explicit boolean for every video', ()
       error => error.code === 'MADE_FOR_KIDS_DECLARATION_REQUIRED'
     );
   }
+});
+
+
+test('API Data handling controls are mandatory even when the API Client project is otherwise approved', () => {
+  const config = approvedConfig();
+  delete config.apiDataHandling;
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('API Data handling policy and verification evidence are missing')));
+});
+
+test('API Data policy enforces 30-day refresh windows and 7/30-day deletion deadlines', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.policy.userDeletionWithinDays = 8;
+  config.apiDataHandling.policy.googleSettingsRevocationDeletionWithinDays = 31;
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('userDeletionWithinDays')));
+  assert.ok(state.blockers.some(item => item.includes('googleSettingsRevocationDeletionWithinDays')));
+});
+
+test('client-initiated revocation requires immediate token revocation and deletion within seven days', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.policy.tokenRevocationImmediateOnClientRevocation = false;
+  config.apiDataHandling.verification.clientRevocationTokenStatus = 'not_verified';
+  config.apiDataHandling.verification.clientRevocationDeletionStatus = 'not_verified';
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('tokenRevocationImmediateOnClientRevocation')));
+  assert.ok(state.blockers.some(item => item.includes('clientRevocationDeletionStatus')));
+  assert.ok(state.blockers.some(item => item.includes('clientRevocationTokenStatus')));
+});
+
+test('unverified storage inventory and retention execution block API Data access', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.verification.storageInventoryStatus = 'not_verified';
+  config.apiDataHandling.verification.retentionJobStatus = 'configured_not_executed';
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('storageInventoryStatus')));
+  assert.ok(state.blockers.some(item => item.includes('retentionJobStatus')));
+});
+
+test('user deletion and Google Security Settings revocation require end-to-end evidence', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.verification.userDeletionStatus = 'not_verified';
+  config.apiDataHandling.verification.googleSettingsRevocationDeletionStatus = 'not_verified';
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('userDeletionStatus')));
+  assert.ok(state.blockers.some(item => item.includes('googleSettingsRevocationDeletionStatus')));
+});
+
+test('cross-account API Data aggregation must be verified disabled', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.policy.crossAccountApiDataAggregationAllowed = true;
+  config.apiDataHandling.verification.crossAccountAggregationStatus = 'enabled';
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('crossAccountApiDataAggregationAllowed')));
+  assert.ok(state.blockers.some(item => item.includes('crossAccountAggregationStatus')));
+});
+
+test('API Data deployment evidence must be fresh and cannot be future-dated', () => {
+  const config = approvedConfig();
+  const now = new Date('2026-11-18T00:00:00.000Z');
+  config.apiDataHandling.verification.verifiedAt = '2026-10-17T00:00:00.000Z';
+  const stale = getYouTubeComplianceState(config, { now });
+  assert.equal(stale.allowed, false);
+  assert.ok(stale.blockers.some(item => item.includes('older than the 30-day internal evidence refresh window')));
+
+  config.apiDataHandling.verification.verifiedAt = '2026-11-19T00:00:00.000Z';
+  const future = getYouTubeComplianceState(config, { now });
+  assert.equal(future.allowed, false);
+  assert.ok(future.blockers.some(item => item.includes('timestamp is in the future')));
+});
+
+test('final child-directed assessment requires product, marketing, audience, and owner evidence', () => {
+  const config = approvedConfig();
+  config.childDirectedAssessment.ownerAttestationStatus = 'pending';
+  config.childDirectedAssessment.productSurfaceEvidenceRefs = [];
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('final child-directed assessment')));
+});
+
+test('boundary review requires at least three source evidence references', () => {
+  const config = approvedConfig();
+  config.boundaryReview.evidenceRefs = ['one'];
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('at least three source evidence references')));
 });
