@@ -198,3 +198,55 @@ test('legacy OAuth entrypoints resolve only to the selected strict account confi
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
 });
+
+
+test('root mode never loads or overwrites the shared YouTube token file', async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'root-token-isolation-'));
+  const tokensPath = path.join(fixtureDir, 'tokens.json');
+  const original = JSON.stringify({ youtube: { refresh_token: 'legacy-shared-token' } });
+  fs.writeFileSync(tokensPath, original);
+  try {
+    const manager = new CredentialManager({ runtime: getWorkspaceRuntime(), tokensPath });
+    await manager.loadTokens();
+    assert.deepEqual(manager.tokens, {});
+    manager.tokens = { youtube: { refresh_token: 'must-not-be-written' } };
+    await assert.rejects(
+      () => manager.saveTokens(),
+      error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED' && error.status === 403
+    );
+    assert.equal(fs.readFileSync(tokensPath, 'utf8'), original);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('strict workspace stores encrypted YouTube tokens only under the account config directory', async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'encrypted-token-isolation-'));
+  try {
+    const accountRoot = path.join(fixtureDir, 'runtime', 'account-a');
+    const configDir = path.join(accountRoot, 'config');
+    process.env.WORKSPACE_ID = 'fixture-isolation';
+    process.env.WORKSPACE_ACCOUNT_ID = 'account-a';
+    process.env.WORKSPACE_RUNTIME_DIR = path.join(fixtureDir, 'runtime');
+    process.env.WORKSPACE_ACCOUNT_ROOT_DIR = accountRoot;
+    process.env.WORKSPACE_DATA_DIR = path.join(accountRoot, 'data');
+    process.env.WORKSPACE_CONFIG_DIR = configDir;
+    process.env.WORKSPACE_STRICT_MODE = 'true';
+
+    const runtime = assertIsolatedWorkspaceRuntime();
+    const tokensPath = path.join(configDir, 'tokens.json');
+    const masterKey = 'a'.repeat(32);
+    const writer = new CredentialManager({ runtime, tokensPath, masterKey });
+    writer.tokens = { youtube: { refresh_token: 'account-a-refresh-token' } };
+    await writer.saveTokens();
+
+    const encrypted = fs.readFileSync(tokensPath, 'utf8');
+    assert.doesNotMatch(encrypted, /account-a-refresh-token/);
+
+    const reader = new CredentialManager({ runtime, tokensPath, masterKey });
+    await reader.loadTokens();
+    assert.equal(reader.tokens.youtube.refresh_token, 'account-a-refresh-token');
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});

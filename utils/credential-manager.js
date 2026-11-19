@@ -46,6 +46,10 @@ class CredentialManager {
   }
 
   async loadTokens() {
+    if (!this.runtime.enabled || !this.runtime.strictMode || !this.runtime.accountId) {
+      this.tokens = {};
+      return;
+    }
     try {
       this.tokens = await readSecretFile(this.tokensPath, this.masterKey);
     } catch (error) {
@@ -61,6 +65,7 @@ class CredentialManager {
   }
 
   async saveTokens() {
+    assertIsolatedWorkspaceRuntime(this.runtime);
     if (this.masterKey) return writeSecretFile(this.tokensPath, this.tokens, this.masterKey);
     await fs.mkdir(path.dirname(this.tokensPath), { recursive: true, mode: 0o700 });
     await fs.writeFile(this.tokensPath, JSON.stringify(this.tokens, null, 2), { mode: 0o600 });
