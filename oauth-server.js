@@ -5,9 +5,13 @@ const path = require('path');
 const chalk = require('chalk');
 const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
 const { YOUTUBE_OAUTH_SCOPES } = require('./utils/youtube-oauth-scopes');
+const { assertIsolatedWorkspaceRuntime } = require('./utils/workspace-runtime');
 
 class OAuthServer {
   constructor() {
+    this.runtime = assertIsolatedWorkspaceRuntime();
+    this.credentialsPath = path.join(this.runtime.configDir, 'credentials.json');
+    this.tokensPath = path.join(this.runtime.configDir, 'tokens.json');
     this.app = express();
     this.server = null;
     this.setupRoutes();
@@ -69,10 +73,7 @@ class OAuthServer {
 
   async exchangeCodeForTokens(code) {
     assertYouTubeComplianceGate('Legacy OAuth token exchange');
-    const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
-    const tokensPath = path.join(__dirname, 'config', 'tokens.json');
-    
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath));
+    const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
     
     const oauth2Client = new google.auth.OAuth2(
       credentials.youtube.client_id,
@@ -87,7 +88,7 @@ class OAuthServer {
       youtube: tokens
     };
     
-    fs.writeFileSync(tokensPath, JSON.stringify(tokenData, null, 2));
+    fs.writeFileSync(this.tokensPath, JSON.stringify(tokenData, null, 2));
     console.log(chalk.green('✅ Tokens saved successfully!'));
   }
 
@@ -116,8 +117,7 @@ class OAuthServer {
 
   generateAuthUrl() {
     assertYouTubeComplianceGate('Legacy OAuth authorization URL generation');
-    const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath));
+    const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
     
     const oauth2Client = new google.auth.OAuth2(
       credentials.youtube.client_id,

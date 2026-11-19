@@ -126,3 +126,8 @@ All workspace accounts launched from this AgentTube codebase are account instanc
 Each account keeps its own `config/credentials.json` and `config/tokens.json` inside its unique runtime/config directory. User authorization tokens must never be reused across accounts. The number of account-local token namespaces is independent of the API Project count.
 
 The YouTube API Client compliance gate in `config/youtube-api-client-compliance.json` blocks OAuth setup and publishing until the product boundary, child-directed assessment, required compliance audit/approval, and one-project mapping are documented. The current state is blocked. Do not create an API Project or credentials while blocked.
+
+
+## YouTube OAuth isolation boundary
+
+YouTube OAuth and token operations are disabled outside strict per-account workspace mode. The legacy `modern-auth.js` and `oauth-server.js` entrypoints now resolve credential and token files only inside the selected account's `WORKSPACE_CONFIG_DIR`; they reject root-mode invocation. The shared `CredentialManager` likewise requires an isolated strict workspace before YouTube credential setup, authorization, or API access. Non-YouTube provider configuration remains separate. Use `node workspace.js credentials --account <account-id>` for account-scoped setup. This is an isolation control, not permission to create API Projects or credentials; the YouTube compliance gate remains independently fail-closed.

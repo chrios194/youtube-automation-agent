@@ -4,7 +4,10 @@ const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 
-const { assertWorkspaceAccountId, getWorkspaceRuntime } = require('../utils/workspace-runtime');
+const { assertWorkspaceAccountId, assertIsolatedWorkspaceRuntime, getWorkspaceRuntime } = require('../utils/workspace-runtime');
+const { CredentialManager } = require('../utils/credential-manager');
+const { ModernAuth } = require('../modern-auth');
+const { OAuthServer } = require('../oauth-server');
 const { validateManifest, buildAccountEnvironment } = require('../workspace');
 
 const originalEnvironment = { ...process.env };
@@ -151,5 +154,47 @@ test('workspace rejects reused master encryption keys across accounts', async ()
     await assert.rejects(() => validateManifest(fixture.manifestPath), /reuses another account's AGENTTUBE_MASTER_KEY/);
   } finally {
     fs.rmSync(fixture.fixtureDir, { recursive: true, force: true });
+  }
+});
+
+
+test('YouTube OAuth and token access fail closed outside strict per-account workspace mode', async () => {
+  assert.throws(() => assertIsolatedWorkspaceRuntime(), error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED' && error.status === 403);
+  assert.throws(() => new ModernAuth(), error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED' && error.status === 403);
+  assert.throws(() => new OAuthServer(), error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED' && error.status === 403);
+
+  const credentials = new CredentialManager();
+  assert.throws(() => credentials.getYouTubeAuth(), error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED');
+  await assert.rejects(() => credentials.authenticateYouTube(), error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED');
+  await assert.rejects(() => credentials.setupYouTubeCredentials(), error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED');
+});
+
+test('legacy OAuth entrypoints resolve only to the selected strict account config directory', () => {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'oauth-isolation-'));
+  try {
+    const accountRoot = path.join(fixtureDir, 'runtime', 'account-a');
+    const configDir = path.join(accountRoot, 'config');
+    process.env.WORKSPACE_ID = 'fixture-isolation';
+    process.env.WORKSPACE_ACCOUNT_ID = 'account-a';
+    process.env.WORKSPACE_RUNTIME_DIR = path.join(fixtureDir, 'runtime');
+    process.env.WORKSPACE_ACCOUNT_ROOT_DIR = accountRoot;
+    process.env.WORKSPACE_DATA_DIR = path.join(accountRoot, 'data');
+    process.env.WORKSPACE_CONFIG_DIR = configDir;
+    process.env.WORKSPACE_STRICT_MODE = 'true';
+
+    const runtime = assertIsolatedWorkspaceRuntime();
+    assert.equal(runtime.accountId, 'account-a');
+    assert.equal(runtime.configDir, configDir);
+
+    const modern = new ModernAuth();
+    const oauth = new OAuthServer();
+    for (const entrypoint of [modern, oauth]) {
+      assert.equal(entrypoint.credentialsPath, path.join(configDir, 'credentials.json'));
+      assert.equal(entrypoint.tokensPath, path.join(configDir, 'tokens.json'));
+      assert.ok(entrypoint.credentialsPath.startsWith(configDir + path.sep));
+      assert.ok(entrypoint.tokensPath.startsWith(configDir + path.sep));
+    }
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
 });

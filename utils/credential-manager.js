@@ -5,7 +5,7 @@ const inquirer = require('inquirer');
 const chalk = require('chalk');
 const { Logger } = require('./logger');
 const { PROVIDERS, GEMINI_MODELS, GEMINI_DEFAULT_MODEL } = require('./ai-text-service');
-const { getWorkspaceRuntime } = require('./workspace-runtime');
+const { getWorkspaceRuntime, assertIsolatedWorkspaceRuntime } = require('./workspace-runtime');
 const { readSecretFile, writeSecretFile } = require('./secret-store');
 const { YOUTUBE_OAUTH_SCOPES } = require('./youtube-oauth-scopes');
 const { getYouTubeComplianceState, assertYouTubeComplianceGate } = require('./youtube-compliance-gate');
@@ -69,6 +69,7 @@ class CredentialManager {
 
   // YouTube API Authentication
   async setupYouTubeCredentials() {
+    assertIsolatedWorkspaceRuntime(this.runtime);
     const gate = this.assertYouTubeComplianceGate('YouTube OAuth credential provisioning');
     console.log(chalk.cyan('\n🎬 YouTube API Setup'));
     console.log(chalk.gray('The approved AgentTube API Project and OAuth client must match the compliance record.'));
@@ -116,6 +117,7 @@ class CredentialManager {
   }
 
   async authenticateYouTube() {
+    assertIsolatedWorkspaceRuntime(this.runtime);
     this.assertYouTubeComplianceGate('YouTube OAuth authorization');
     const oauth2Client = new google.auth.OAuth2(
       this.credentials.youtube.client_id,
@@ -152,6 +154,7 @@ class CredentialManager {
   }
 
   getYouTubeAuth() {
+    assertIsolatedWorkspaceRuntime(this.runtime);
     const gate = this.assertYouTubeComplianceGate('YouTube API access');
     if (gate.config?.apiProject?.oauthClientId && this.credentials.youtube?.client_id !== gate.config.apiProject.oauthClientId) {
       const error = new Error('Stored OAuth client ID does not match the single API Project approved for this AgentTube API Client');
