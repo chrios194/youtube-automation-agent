@@ -13,12 +13,14 @@
   },
   "boundaryReview": {
     "status": "identified_pending_deployment_and_child_audience_review",
-    "reviewedAt": "2026-11-15",
+    "reviewedAt": "2026-11-21",
     "evidenceRefs": [
       "README.md: AgentTube creator-business operating system and operator workflow",
       "docs/multi-account-workspaces.md: one AgentTube product launches isolated account processes",
       "index.js: Express application initializes PublishingSchedulingAgent",
-      "agents/publishing-scheduling-agent.js: google.youtube(v3) and videos.insert"
+      "agents/publishing-scheduling-agent.js: google.youtube(v3) and videos.insert",
+      "docs/YOUTUBE-API-DATA-HANDLING-2026-11-21.md",
+      "Core: docs/YOUTUBE-API-CLIENT-BOUNDARY-REVIEW-2026-11-21.md"
     ]
   },
   "childDirectedAssessment": {
