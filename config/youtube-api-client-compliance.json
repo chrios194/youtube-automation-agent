@@ -105,7 +105,9 @@
       "crossChannelApiDataAggregationAllowed": false,
       "centralDashboardApiDataAggregationAllowed": false,
       "centralDashboardApiDataVisibility": "none",
-      "centralDashboardOperationalMetadataOnly": true
+      "centralDashboardOperationalMetadataOnly": true,
+      "crossChannelAggregationDisabledVerificationRequired": true,
+      "crossContentOwnerAggregationDisabledVerificationRequired": true
     },
     "verification": {
       "storageInventoryStatus": "not_verified",
@@ -128,7 +130,11 @@
       "analyticsReportingAuthorizationRecheckStatus": "not_verified",
       "analyticsReportingAuthorizationRecheckEvidenceRef": null,
       "analyticsReportingVideoExistenceRecheckStatus": "not_verified",
-      "analyticsReportingVideoExistenceRecheckEvidenceRef": null
+      "analyticsReportingVideoExistenceRecheckEvidenceRef": null,
+      "crossChannelAggregationStatus": "not_verified",
+      "crossChannelAggregationEvidenceRef": null,
+      "crossContentOwnerAggregationStatus": "not_verified",
+      "crossContentOwnerAggregationEvidenceRef": null
     }
   },
   "controls": {
