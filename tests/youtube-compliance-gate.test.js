@@ -68,6 +68,8 @@ function approvedConfig() {
       clientRevocationTokenEvidenceRef: 'test:client-token-revocation',
       googleSettingsRevocationDeletionEvidenceRef: 'test:google-settings-revocation',
       crossAccountAggregationEvidenceRef: 'test:cross-account-disabled',
+      crossChannelAggregationEvidenceRef: 'test:cross-channel-disabled',
+      crossContentOwnerAggregationEvidenceRef: 'test:cross-content-owner-disabled',
       verifiedAt: new Date().toISOString()
     }
   };
@@ -228,14 +230,21 @@ test('user deletion and Google Security Settings revocation require end-to-end e
   assert.ok(state.blockers.some(item => item.includes('googleSettingsRevocationDeletionStatus')));
 });
 
-test('cross-account API Data aggregation must be verified disabled', () => {
-  const config = approvedConfig();
-  config.apiDataHandling.policy.crossAccountApiDataAggregationAllowed = true;
-  config.apiDataHandling.verification.crossAccountAggregationStatus = 'enabled';
-  const state = getYouTubeComplianceState(config);
-  assert.equal(state.allowed, false);
-  assert.ok(state.blockers.some(item => item.includes('crossAccountApiDataAggregationAllowed')));
-  assert.ok(state.blockers.some(item => item.includes('crossAccountAggregationStatus')));
+test('cross-account, cross-channel, and cross-content-owner API Data aggregation each require explicit deployed disablement evidence', () => {
+  const cases = [
+    ['crossAccountApiDataAggregationAllowed', 'crossAccountAggregationStatus'],
+    ['crossChannelApiDataAggregationAllowed', 'crossChannelAggregationStatus'],
+    ['crossContentOwnerApiDataAggregationAllowed', 'crossContentOwnerAggregationStatus']
+  ];
+  for (const [policyField, verificationField] of cases) {
+    const config = approvedConfig();
+    config.apiDataHandling.policy[policyField] = true;
+    config.apiDataHandling.verification[verificationField] = 'enabled';
+    const state = getYouTubeComplianceState(config);
+    assert.equal(state.allowed, false);
+    assert.ok(state.blockers.some(item => item.includes(policyField)));
+    assert.ok(state.blockers.some(item => item.includes(verificationField)));
+  }
 });
 
 test('API Data deployment evidence must be fresh and cannot be future-dated', () => {
