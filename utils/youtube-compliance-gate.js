@@ -21,6 +21,8 @@ const REQUIRED_API_DATA_POLICY = Object.freeze({
   crossAccountApiDataAggregationAllowed: false,
   crossChannelApiDataAggregationAllowed: false,
   crossContentOwnerApiDataAggregationAllowed: false,
+  crossChannelAggregationDisabledVerificationRequired: true,
+  crossContentOwnerAggregationDisabledVerificationRequired: true,
   centralDashboardApiDataAggregationAllowed: false,
   centralDashboardApiDataVisibility: 'none',
   centralDashboardOperationalMetadataOnly: true,
@@ -46,7 +48,9 @@ const REQUIRED_API_DATA_VERIFICATION = Object.freeze({
   clientRevocationDeletionStatus: 'end_to_end_verified',
   clientRevocationTokenStatus: 'immediate_revocation_verified',
   googleSettingsRevocationDeletionStatus: 'end_to_end_verified',
-  crossAccountAggregationStatus: 'verified_disabled'
+  crossAccountAggregationStatus: 'verified_disabled',
+  crossChannelAggregationStatus: 'verified_disabled',
+  crossContentOwnerAggregationStatus: 'verified_disabled'
 });
 
 const REQUIRED_API_DATA_EVIDENCE = Object.freeze([
@@ -61,6 +65,8 @@ const REQUIRED_API_DATA_EVIDENCE = Object.freeze([
   'clientRevocationTokenEvidenceRef',
   'googleSettingsRevocationDeletionEvidenceRef',
   'crossAccountAggregationEvidenceRef',
+  'crossChannelAggregationEvidenceRef',
+  'crossContentOwnerAggregationEvidenceRef',
   'verifiedAt'
 ]);
 
