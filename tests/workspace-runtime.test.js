@@ -310,6 +310,58 @@ test('strict CredentialManager rejects legacy plaintext credential and token fil
   }
 });
 
+test('strict workspace secret storage rejects symlinked secret files and config directories', async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'secret-symlink-rejection-'));
+  try {
+    const accountRoot = path.join(fixtureDir, 'runtime', 'account-a');
+    const configDir = path.join(accountRoot, 'config');
+    const outsideDir = path.join(fixtureDir, 'outside');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const outsideSecret = path.join(outsideDir, 'credentials.json');
+    fs.writeFileSync(outsideSecret, JSON.stringify({ format: 'agenttube-secret-v1' }));
+
+    process.env.WORKSPACE_ID = 'fixture-isolation';
+    process.env.WORKSPACE_ACCOUNT_ID = 'account-a';
+    process.env.WORKSPACE_RUNTIME_DIR = path.join(fixtureDir, 'runtime');
+    process.env.WORKSPACE_ACCOUNT_ROOT_DIR = accountRoot;
+    process.env.WORKSPACE_DATA_DIR = path.join(accountRoot, 'data');
+    process.env.WORKSPACE_CONFIG_DIR = configDir;
+    process.env.WORKSPACE_STRICT_MODE = 'true';
+
+    const runtime = assertIsolatedWorkspaceRuntime();
+    const masterKey = 's'.repeat(32);
+    const linkedSecret = path.join(configDir, 'credentials.json');
+    fs.symlinkSync(outsideSecret, linkedSecret);
+    await assert.rejects(
+      () => readWorkspaceSecretFile(linkedSecret, runtime, masterKey),
+      /symbolic link/
+    );
+    await assert.rejects(
+      () => writeWorkspaceSecretFile(linkedSecret, { youtube: {} }, runtime, masterKey),
+      /symbolic link/
+    );
+
+    const accountRootB = path.join(fixtureDir, 'runtime', 'account-b');
+    const outsideConfig = path.join(fixtureDir, 'outside-config');
+    fs.mkdirSync(accountRootB, { recursive: true });
+    fs.mkdirSync(outsideConfig, { recursive: true });
+    fs.symlinkSync(outsideConfig, path.join(accountRootB, 'config'));
+    process.env.WORKSPACE_ACCOUNT_ID = 'account-b';
+    process.env.WORKSPACE_ACCOUNT_ROOT_DIR = accountRootB;
+    process.env.WORKSPACE_DATA_DIR = path.join(accountRootB, 'data');
+    process.env.WORKSPACE_CONFIG_DIR = path.join(accountRootB, 'config');
+
+    const runtimeB = assertIsolatedWorkspaceRuntime();
+    await assert.rejects(
+      () => writeWorkspaceSecretFile(path.join(runtimeB.configDir, 'credentials.json'), { youtube: {} }, runtimeB, masterKey),
+      /symbolic links/
+    );
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
 test('strict workspace stores encrypted YouTube tokens only under the account config directory', async () => {
   const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'encrypted-token-isolation-'));
   try {
