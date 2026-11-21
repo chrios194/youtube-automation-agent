@@ -71,8 +71,54 @@ function assertWorkspaceSecretPath(filePath, runtime, masterKey) {
   return target;
 }
 
-async function readWorkspaceSecretFile(filePath, runtime, masterKey) {
+async function resolveWorkspaceSecretPath(filePath, runtime, masterKey, { createParent = false } = {}) {
   const target = assertWorkspaceSecretPath(filePath, runtime, masterKey);
+  const accountRoot = path.resolve(runtime.accountRoot || '');
+  const configRoot = path.resolve(runtime.configDir);
+
+  if (!runtime.accountRoot) {
+    throw new Error('Workspace secret storage requires an explicit account runtime root');
+  }
+
+  const realAccountRoot = await fs.realpath(accountRoot);
+  if (realAccountRoot !== accountRoot) {
+    throw new Error('Workspace account runtime root must not contain symbolic links');
+  }
+
+  if (createParent) {
+    await fs.mkdir(configRoot, { recursive: true, mode: 0o700 });
+  }
+  const realConfigRoot = await fs.realpath(configRoot);
+  if (realConfigRoot !== configRoot || !realConfigRoot.startsWith(`${realAccountRoot}${path.sep}`)) {
+    throw new Error('Workspace secret config directory must remain inside the selected account runtime directory and must not contain symbolic links');
+  }
+
+  const parentPath = path.dirname(target);
+  if (createParent) {
+    await fs.mkdir(parentPath, { recursive: true, mode: 0o700 });
+  }
+  const realParent = await fs.realpath(parentPath);
+  if (realParent !== parentPath || (realParent !== realConfigRoot && !realParent.startsWith(`${realConfigRoot}${path.sep}`))) {
+    throw new Error('Workspace secret parent directory must remain inside the account config directory and must not contain symbolic links');
+  }
+
+  let targetStat = null;
+  try {
+    targetStat = await fs.lstat(target);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (targetStat?.isSymbolicLink()) {
+    throw new Error('Workspace secret file must not be a symbolic link');
+  }
+  if (targetStat && !targetStat.isFile()) {
+    throw new Error('Workspace secret path must be a regular file');
+  }
+  return target;
+}
+
+async function readWorkspaceSecretFile(filePath, runtime, masterKey) {
+  const target = await resolveWorkspaceSecretPath(filePath, runtime, masterKey);
   const parsed = JSON.parse(await fs.readFile(target, 'utf8'));
   if (parsed?.format !== FORMAT) {
     throw new Error('Plaintext workspace secret files are rejected; an encrypted AgentTube secret envelope is required');
@@ -81,7 +127,7 @@ async function readWorkspaceSecretFile(filePath, runtime, masterKey) {
 }
 
 async function writeWorkspaceSecretFile(filePath, value, runtime, masterKey) {
-  const target = assertWorkspaceSecretPath(filePath, runtime, masterKey);
+  const target = await resolveWorkspaceSecretPath(filePath, runtime, masterKey, { createParent: true });
   await atomicWriteJson(target, encryptObject(value, masterKey));
 }
 
