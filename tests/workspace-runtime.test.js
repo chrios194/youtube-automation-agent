@@ -6,6 +6,7 @@ const { execFileSync } = require('child_process');
 
 const { assertWorkspaceAccountId, assertIsolatedWorkspaceRuntime, getWorkspaceRuntime } = require('../utils/workspace-runtime');
 const { CredentialManager } = require('../utils/credential-manager');
+const { readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('../utils/secret-store');
 const { ModernAuth } = require('../modern-auth');
 const { OAuthServer } = require('../oauth-server');
 const { validateManifest, buildAccountEnvironment } = require('../workspace');
@@ -215,6 +216,91 @@ test('root mode never loads or overwrites the shared YouTube token file', async 
       error => error.code === 'YOUTUBE_WORKSPACE_REQUIRED' && error.status === 403
     );
     assert.equal(fs.readFileSync(tokensPath, 'utf8'), original);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('legacy OAuth entrypoints encrypt tokens and reject plaintext workspace credentials', async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'legacy-oauth-encryption-'));
+  try {
+    const accountRoot = path.join(fixtureDir, 'runtime', 'account-a');
+    const configDir = path.join(accountRoot, 'config');
+    process.env.WORKSPACE_ID = 'fixture-isolation';
+    process.env.WORKSPACE_ACCOUNT_ID = 'account-a';
+    process.env.WORKSPACE_RUNTIME_DIR = path.join(fixtureDir, 'runtime');
+    process.env.WORKSPACE_ACCOUNT_ROOT_DIR = accountRoot;
+    process.env.WORKSPACE_DATA_DIR = path.join(accountRoot, 'data');
+    process.env.WORKSPACE_CONFIG_DIR = configDir;
+    process.env.WORKSPACE_STRICT_MODE = 'true';
+    process.env.AGENTTUBE_MASTER_KEY = 'k'.repeat(32);
+
+    const runtime = assertIsolatedWorkspaceRuntime();
+    const modern = new ModernAuth();
+    const oauth = new OAuthServer();
+    const credentials = {
+      youtube: {
+        client_id: 'fixture-client-id',
+        client_secret: 'fixture-client-secret',
+        redirect_uris: ['http://localhost:8080/callback']
+      }
+    };
+    await writeWorkspaceSecretFile(modern.credentialsPath, credentials, runtime, process.env.AGENTTUBE_MASTER_KEY);
+    assert.deepEqual(await modern.loadCredentials(), credentials);
+    assert.deepEqual(await oauth.loadCredentials(), credentials);
+
+    const modernTokens = { access_token: 'modern-access-secret', refresh_token: 'modern-refresh-secret' };
+    await modern.saveTokens(modernTokens);
+    const modernRaw = fs.readFileSync(modern.tokensPath, 'utf8');
+    assert.doesNotMatch(modernRaw, /modern-(?:access|refresh)-secret/);
+    assert.deepEqual(await modern.loadTokens(), { youtube: modernTokens });
+
+    const oauthTokens = { access_token: 'oauth-access-secret', refresh_token: 'oauth-refresh-secret' };
+    await oauth.saveTokens(oauthTokens);
+    const oauthRaw = fs.readFileSync(oauth.tokensPath, 'utf8');
+    assert.doesNotMatch(oauthRaw, /oauth-(?:access|refresh)-secret/);
+    assert.deepEqual(await readWorkspaceSecretFile(oauth.tokensPath, runtime, process.env.AGENTTUBE_MASTER_KEY), { youtube: oauthTokens });
+
+    fs.writeFileSync(modern.credentialsPath, JSON.stringify(credentials));
+    await assert.rejects(
+      () => modern.loadCredentials(),
+      /Plaintext workspace secret files are rejected/
+    );
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('strict CredentialManager rejects legacy plaintext credential and token files', async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'legacy-plaintext-rejection-'));
+  try {
+    const accountRoot = path.join(fixtureDir, 'runtime', 'account-a');
+    const configDir = path.join(accountRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    process.env.WORKSPACE_ID = 'fixture-isolation';
+    process.env.WORKSPACE_ACCOUNT_ID = 'account-a';
+    process.env.WORKSPACE_RUNTIME_DIR = path.join(fixtureDir, 'runtime');
+    process.env.WORKSPACE_ACCOUNT_ROOT_DIR = accountRoot;
+    process.env.WORKSPACE_DATA_DIR = path.join(accountRoot, 'data');
+    process.env.WORKSPACE_CONFIG_DIR = configDir;
+    process.env.WORKSPACE_STRICT_MODE = 'true';
+    process.env.AGENTTUBE_MASTER_KEY = 'm'.repeat(32);
+
+    const runtime = assertIsolatedWorkspaceRuntime();
+    const credentialsPath = path.join(configDir, 'credentials.json');
+    const tokensPath = path.join(configDir, 'tokens.json');
+    const credentialsRaw = JSON.stringify({ youtube: { client_secret: 'plaintext-client-secret' } });
+    const tokensRaw = JSON.stringify({ youtube: { refresh_token: 'plaintext-refresh-token' } });
+    fs.writeFileSync(credentialsPath, credentialsRaw);
+    fs.writeFileSync(tokensPath, tokensRaw);
+
+    const manager = new CredentialManager({ runtime, credentialsPath, tokensPath });
+    await manager.loadCredentials();
+    await manager.loadTokens();
+    assert.deepEqual(manager.credentials, {});
+    assert.deepEqual(manager.tokens, {});
+    assert.equal(fs.readFileSync(credentialsPath, 'utf8'), credentialsRaw);
+    assert.equal(fs.readFileSync(tokensPath, 'utf8'), tokensRaw);
   } finally {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
