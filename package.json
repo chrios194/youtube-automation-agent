@@ -14,7 +14,7 @@
     "workspace:status": "node workspace.js status",
     "workspace:credentials": "node workspace.js credentials",
     "workspace:start": "node workspace.js start",
-    "test": "node test.js && node --test tests/workspace-runtime.test.js",
+    "test": "node test.js && node --test tests/workspace-runtime.test.js tests/youtube-compliance-gate.test.js",
     "agent:strategy": "node agents/content-strategy-agent.js",
     "agent:script": "node agents/script-writer-agent.js",
     "agent:thumbnail": "node agents/thumbnail-designer-agent.js",

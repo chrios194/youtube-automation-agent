@@ -67,9 +67,23 @@ function getWorkspaceRuntime() {
   };
 }
 
+function assertIsolatedWorkspaceRuntime(runtime = getWorkspaceRuntime()) {
+  if (!runtime || runtime.enabled !== true || runtime.strictMode !== true || !runtime.accountId) {
+    const error = new Error(
+      "YouTube OAuth and token operations require strict per-account workspace mode. " +
+      "Use `node workspace.js credentials --account <account-id>`."
+    );
+    error.code = "YOUTUBE_WORKSPACE_REQUIRED";
+    error.status = 403;
+    throw error;
+  }
+  return runtime;
+}
+
 module.exports = {
   ACCOUNT_ID_PATTERN,
   assertWorkspaceAccountId,
+  assertIsolatedWorkspaceRuntime,
   getWorkspaceRuntime,
   hasWorkspaceAccount
 };

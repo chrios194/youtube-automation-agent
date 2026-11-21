@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs').promises;
 const path = require('path');
+const { assertIsolatedWorkspaceRuntime } = require('./workspace-runtime');
 
 const FORMAT = 'agenttube-secret-v1';
 
@@ -57,4 +58,40 @@ async function writeSecretFile(filePath, value, masterKey) {
   await atomicWriteJson(filePath, encryptObject(value, masterKey));
 }
 
-module.exports = { FORMAT, encryptObject, decryptObject, readSecretFile, writeSecretFile, atomicWriteJson };
+function assertWorkspaceSecretPath(filePath, runtime, masterKey) {
+  assertIsolatedWorkspaceRuntime(runtime);
+  if (typeof masterKey !== 'string' || masterKey.length < 32) {
+    throw new Error('AGENTTUBE_MASTER_KEY must be at least 32 characters for strict workspace secret storage');
+  }
+  const configRoot = path.resolve(runtime.configDir);
+  const target = path.resolve(filePath);
+  if (!target.startsWith(`${configRoot}${path.sep}`)) {
+    throw new Error('Workspace secret file must remain inside the selected account config directory');
+  }
+  return target;
+}
+
+async function readWorkspaceSecretFile(filePath, runtime, masterKey) {
+  const target = assertWorkspaceSecretPath(filePath, runtime, masterKey);
+  const parsed = JSON.parse(await fs.readFile(target, 'utf8'));
+  if (parsed?.format !== FORMAT) {
+    throw new Error('Plaintext workspace secret files are rejected; an encrypted AgentTube secret envelope is required');
+  }
+  return decryptObject(parsed, masterKey);
+}
+
+async function writeWorkspaceSecretFile(filePath, value, runtime, masterKey) {
+  const target = assertWorkspaceSecretPath(filePath, runtime, masterKey);
+  await atomicWriteJson(target, encryptObject(value, masterKey));
+}
+
+module.exports = {
+  FORMAT,
+  encryptObject,
+  decryptObject,
+  readSecretFile,
+  writeSecretFile,
+  readWorkspaceSecretFile,
+  writeWorkspaceSecretFile,
+  atomicWriteJson
+};
