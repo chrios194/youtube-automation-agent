@@ -1,6 +1,6 @@
 const express = require('express');
 const { google } = require('googleapis');
-const fs = require('fs');
+const { readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('./utils/secret-store');
 const path = require('path');
 const chalk = require('chalk');
 const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
@@ -15,6 +15,14 @@ class OAuthServer {
     this.app = express();
     this.server = null;
     this.setupRoutes();
+  }
+
+  async loadCredentials() {
+    return readWorkspaceSecretFile(this.credentialsPath, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
+  async saveTokens(tokens) {
+    return writeWorkspaceSecretFile(this.tokensPath, { youtube: tokens }, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
   }
 
   setupRoutes() {
@@ -73,7 +81,7 @@ class OAuthServer {
 
   async exchangeCodeForTokens(code) {
     assertYouTubeComplianceGate('Legacy OAuth token exchange');
-    const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
+    const credentials = await this.loadCredentials();
     
     const oauth2Client = new google.auth.OAuth2(
       credentials.youtube.client_id,
@@ -84,11 +92,7 @@ class OAuthServer {
     const { tokens } = await oauth2Client.getToken(code);
     
     // Save tokens
-    const tokenData = {
-      youtube: tokens
-    };
-    
-    fs.writeFileSync(this.tokensPath, JSON.stringify(tokenData, null, 2));
+    await this.saveTokens(tokens);
     console.log(chalk.green('✅ Tokens saved successfully!'));
   }
 
@@ -111,13 +115,16 @@ class OAuthServer {
     assertYouTubeComplianceGate('Legacy OAuth server startup');
     this.server = this.app.listen(8080, () => {
       console.log(chalk.cyan('\n🔐 OAuth callback server started on http://localhost:8080'));
-      this.generateAuthUrl();
+      this.generateAuthUrl().catch(error => {
+        console.error(chalk.red('OAuth authorization URL generation failed:'), error.message);
+        if (this.server) this.server.close();
+      });
     });
   }
 
-  generateAuthUrl() {
+  async generateAuthUrl() {
     assertYouTubeComplianceGate('Legacy OAuth authorization URL generation');
-    const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
+    const credentials = await this.loadCredentials();
     
     const oauth2Client = new google.auth.OAuth2(
       credentials.youtube.client_id,
