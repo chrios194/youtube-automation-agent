@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const fs = require('fs');
+const { readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('./utils/secret-store');
 const path = require('path');
 const chalk = require('chalk');
 const http = require('http');
@@ -16,13 +16,25 @@ class ModernAuth {
     this.server = null;
   }
 
+  async loadCredentials() {
+    return readWorkspaceSecretFile(this.credentialsPath, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
+  async loadTokens() {
+    return readWorkspaceSecretFile(this.tokensPath, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
+  async saveTokens(tokens) {
+    return writeWorkspaceSecretFile(this.tokensPath, { youtube: tokens }, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
   async authenticate() {
     assertYouTubeComplianceGate('Legacy modern OAuth authorization');
     console.log(chalk.cyan.bold('\n🔐 YouTube Authentication (Modern Flow)'));
     console.log(chalk.gray('═'.repeat(60)));
     
     try {
-      const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
+      const credentials = await this.loadCredentials();
       
       // Use a random high port to avoid conflicts
       const port = 8000 + Math.floor(Math.random() * 1000);
@@ -107,8 +119,7 @@ class ModernAuth {
             const { tokens } = await oauth2Client.getToken(code);
             
             // Save tokens
-            const tokenData = { youtube: tokens };
-            fs.writeFileSync(this.tokensPath, JSON.stringify(tokenData, null, 2));
+            await this.saveTokens(tokens);
             
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(`
@@ -163,8 +174,8 @@ class ModernAuth {
   async testAuthentication() {
     assertYouTubeComplianceGate('Legacy modern OAuth token validation');
     try {
-      const tokens = JSON.parse(fs.readFileSync(this.tokensPath));
-      const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
+      const tokens = await this.loadTokens();
+      const credentials = await this.loadCredentials();
       
       const oauth2Client = new google.auth.OAuth2(
         credentials.youtube.client_id,
