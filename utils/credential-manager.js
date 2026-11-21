@@ -6,7 +6,7 @@ const chalk = require('chalk');
 const { Logger } = require('./logger');
 const { PROVIDERS, GEMINI_MODELS, GEMINI_DEFAULT_MODEL } = require('./ai-text-service');
 const { getWorkspaceRuntime, assertIsolatedWorkspaceRuntime } = require('./workspace-runtime');
-const { readSecretFile, writeSecretFile } = require('./secret-store');
+const { readSecretFile, writeSecretFile, readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('./secret-store');
 const { YOUTUBE_OAUTH_SCOPES } = require('./youtube-oauth-scopes');
 const { getYouTubeComplianceState, assertYouTubeComplianceGate } = require('./youtube-compliance-gate');
 
@@ -21,8 +21,8 @@ class CredentialManager {
     this.masterKey = options.masterKey || process.env.AGENTTUBE_MASTER_KEY || null;
     this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
     this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
-    if (this.runtime.strictMode && !this.masterKey) {
-      throw new Error('Workspace strict mode requires AGENTTUBE_MASTER_KEY (32+ characters) for encrypted credential storage');
+    if (this.runtime.strictMode && (!this.masterKey || this.masterKey.length < 32)) {
+      throw new Error('Workspace strict mode requires AGENTTUBE_MASTER_KEY (at least 32 characters) for encrypted credential storage');
     }
   }
 
@@ -39,7 +39,9 @@ class CredentialManager {
 
   async loadCredentials() {
     try {
-      this.credentials = await readSecretFile(this.credentialsPath, this.masterKey);
+      this.credentials = this.runtime.enabled && this.runtime.strictMode
+        ? await readWorkspaceSecretFile(this.credentialsPath, this.runtime, this.masterKey)
+        : await readSecretFile(this.credentialsPath, this.masterKey);
     } catch (error) {
       this.credentials = {};
     }
@@ -51,13 +53,16 @@ class CredentialManager {
       return;
     }
     try {
-      this.tokens = await readSecretFile(this.tokensPath, this.masterKey);
+      this.tokens = await readWorkspaceSecretFile(this.tokensPath, this.runtime, this.masterKey);
     } catch (error) {
       this.tokens = {};
     }
   }
 
   async saveCredentials() {
+    if (this.runtime.enabled && this.runtime.strictMode) {
+      return writeWorkspaceSecretFile(this.credentialsPath, this.credentials, this.runtime, this.masterKey);
+    }
     if (this.masterKey) return writeSecretFile(this.credentialsPath, this.credentials, this.masterKey);
     await fs.mkdir(path.dirname(this.credentialsPath), { recursive: true, mode: 0o700 });
     await fs.writeFile(this.credentialsPath, JSON.stringify(this.credentials, null, 2), { mode: 0o600 });
@@ -65,11 +70,7 @@ class CredentialManager {
   }
 
   async saveTokens() {
-    assertIsolatedWorkspaceRuntime(this.runtime);
-    if (this.masterKey) return writeSecretFile(this.tokensPath, this.tokens, this.masterKey);
-    await fs.mkdir(path.dirname(this.tokensPath), { recursive: true, mode: 0o700 });
-    await fs.writeFile(this.tokensPath, JSON.stringify(this.tokens, null, 2), { mode: 0o600 });
-    await fs.chmod(this.tokensPath, 0o600);
+    return writeWorkspaceSecretFile(this.tokensPath, this.tokens, this.runtime, this.masterKey);
   }
 
   // YouTube API Authentication
