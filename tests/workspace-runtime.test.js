@@ -266,6 +266,10 @@ test('legacy OAuth entrypoints encrypt tokens and reject plaintext workspace cre
       () => modern.loadCredentials(),
       /Plaintext workspace secret files are rejected/
     );
+    await assert.rejects(
+      () => oauth.loadCredentials(),
+      /Plaintext workspace secret files are rejected/
+    );
   } finally {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
