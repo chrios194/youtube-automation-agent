@@ -476,13 +476,13 @@ Comments: ${JSON.stringify(payload)}`;
   }
 
   postingEnabled() {
+    if (!this.credentials?.hasYouTubeScope) return { enabled: false, reason: 'credentials_unavailable' };
+    if (!this.credentials.hasYouTubeScope(FORCE_SSL_SCOPE)) return { enabled: false, reason: 'missing_scope' };
     const compliance = this.getYouTubeComplianceState();
     if (!compliance.allowed) return { enabled: false, reason: 'youtube_compliance_gate_blocked' };
     if (typeof this.getWriteActionConsent !== 'function' || typeof this.consumeWriteActionConsent !== 'function' || typeof this.getAuthorizingUserId !== 'function' || !this.apiClientId) {
       return { enabled: false, reason: 'per_action_user_consent_provider_unavailable' };
     }
-    if (!this.credentials?.hasYouTubeScope) return { enabled: false, reason: 'credentials_unavailable' };
-    if (!this.credentials.hasYouTubeScope(FORCE_SSL_SCOPE)) return { enabled: false, reason: 'missing_scope' };
     return { enabled: true, reason: null };
   }
 
@@ -521,7 +521,6 @@ Comments: ${JSON.stringify(payload)}`;
   }
 
   async approveReplyDraft(draftId, input = {}) {
-    this.assertYouTubeComplianceGate('YouTube comment reply write');
     if (input.confirmed !== true) {
       const error = new Error('Confirm the reply text before posting to YouTube');
       error.status = 409;
