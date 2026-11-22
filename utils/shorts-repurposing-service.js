@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { runFFmpeg } = require('./ffmpeg');
 const { Logger } = require('./logger');
+const { validateMediaSourceProvenance, verifyMediaSourceProvenance, hashFile } = require('./media-source-provenance');
 
 const LAYOUTS = new Set(['blur', 'crop', 'stacked']);
 
@@ -182,6 +183,14 @@ class ShortsRepurposingService {
     }
     const sourceVideo = bundle.assets?.finalVideo?.path;
     await this.requireFile(sourceVideo, 'The approved source MP4 is missing');
+    const sourceMediaProvenance = bundle.assets?.finalVideo?.mediaProvenance;
+    const sourceMediaCheck = await verifyMediaSourceProvenance(sourceMediaProvenance, sourceVideo);
+    if (!sourceMediaCheck.valid) {
+      const error = new Error('Short rendering is blocked until source media rights/provenance and the exact file hash are verified: ' + sourceMediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
+      throw error;
+    }
     const sourceScenes = (bundle.scenes || []).filter(scene => clip.sourceSceneIds.includes(scene.id));
     if (!sourceScenes.length) throw new Error('The selected source scenes no longer exist');
 
@@ -203,8 +212,22 @@ class ShortsRepurposingService {
       await this.runFFmpeg(['-v', 'error', '-i', outputPath, '-f', 'null', '-']);
       const stats = await fs.stat(outputPath);
       if (!stats.isFile() || stats.size <= 0) throw new Error('FFmpeg returned an empty Short');
+      const outputSha256 = await hashFile(outputPath);
+      const derivedMediaProvenance = {
+        ...sourceMediaProvenance,
+        sha256: outputSha256,
+        sourceSha256: sourceMediaCheck.sha256,
+        derivedFromSourceRef: sourceMediaProvenance.sourceRef,
+        derivationRef: 'short:' + clip.id,
+        transformation: 'shorts-reframe',
+        createdAt: new Date().toISOString()
+      };
+      const inheritedEvidence = {
+        ...(clip.inheritedEvidence || {}),
+        mediaProvenance: derivedMediaProvenance
+      };
       return this.db.updateShortClip(clip.id, {
-        status: 'rendered', outputPath, captionsPath, error: null,
+        status: 'rendered', outputPath, captionsPath, inheritedEvidence, error: null,
         renderedAt: new Date().toISOString()
       });
     } catch (error) {
@@ -305,7 +328,7 @@ class ShortsRepurposingService {
         tags: [...new Set([...(clip.tags || []), 'Shorts'])]
       },
       assets: {
-        finalVideo: { path: clip.outputPath, simulated: false, aspectRatio: '9:16', duration: clip.duration },
+        finalVideo: { path: clip.outputPath, simulated: false, aspectRatio: '9:16', duration: clip.duration, mediaProvenance: clip.inheritedEvidence?.mediaProvenance || null },
         audio,
         captions: clip.captionsPath ? { path: clip.captionsPath } : null,
         thumbnail: null
@@ -334,7 +357,10 @@ class ShortsRepurposingService {
   inheritedEvidence(bundle) {
     const blockingReasons = [];
     if (bundle.review_status !== 'approved') blockingReasons.push('source approval');
-    if (!['verified', 'not_required'].includes(bundle.provenance?.status || 'not_required')) blockingReasons.push('provenance review');
+    if (!['verified', 'not_required'].includes(bundle.provenance?.status || 'not_required')) blockingReasons.push('factual-claim provenance review');
+    const mediaProvenance = bundle.assets?.finalVideo?.mediaProvenance || null;
+    const mediaProvenanceBlockers = validateMediaSourceProvenance(mediaProvenance);
+    if (mediaProvenanceBlockers.length) blockingReasons.push('media source rights/provenance');
     const unlicensed = (bundle.scenes || []).filter(scene => scene.assetOrigin === 'uploaded' && !scene.rightsConfirmed);
     if (unlicensed.length) blockingReasons.push('media rights');
     const stale = (bundle.scenes || []).filter(scene =>
@@ -346,6 +372,8 @@ class ShortsRepurposingService {
       blockingReasons,
       sourceReviewStatus: bundle.review_status || 'needs_review',
       provenanceStatus: bundle.provenance?.status || 'not_required',
+      mediaProvenance,
+      mediaProvenanceVerified: mediaProvenanceBlockers.length === 0,
       rightsConfirmed: unlicensed.length === 0,
       containsSyntheticMedia: bundle.provenance?.containsSyntheticMedia === true,
       capturedAt: new Date().toISOString()
