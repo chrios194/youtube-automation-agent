@@ -313,8 +313,8 @@ class PublishingSchedulingAgent {
       try {
         await this.uploadThumbnail(videoId, metadata.thumbnail.path, metadata.thumbnail.mediaProvenance);
       } catch (error) {
-        if (error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) {
-          this.logger.warn('Thumbnail upload skipped because it has no separate, exact user consent');
+        if ((error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) || error.code === 'MEDIA_SOURCE_PROVENANCE_BLOCKED') {
+          this.logger.warn('Thumbnail upload skipped because separate user consent or media provenance is missing');
         } else {
           throw error;
         }
@@ -325,7 +325,7 @@ class PublishingSchedulingAgent {
         await this.uploadCaptions(videoId, metadata.captions.path);
       } catch (error) {
         if (error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) {
-          this.logger.warn('Captions upload skipped because it has no separate, exact user consent');
+          this.logger.warn('Captions upload skipped because separate user consent is missing');
         } else {
           throw error;
         }
