@@ -6,10 +6,42 @@ const { DailyAutomation } = require('./schedules/daily-automation');
 const chalk = require('chalk');
 const path = require('path');
 
-const ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS = {
-  getYouTubeComplianceState: () => ({ allowed: true, blockers: [] }),
-  assertYouTubeComplianceGate: () => ({ allowed: true, config: { apiProject: { oauthClientId: 'test-client' } } })
+const TEST_YOUTUBE_COMPLIANCE_CONFIG = {
+  apiClient: { id: 'test-api-client' },
+  apiProject: { oauthClientId: 'test-client' }
 };
+const ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS = {
+  getYouTubeComplianceState: () => ({ allowed: true, blockers: [], config: TEST_YOUTUBE_COMPLIANCE_CONFIG }),
+  assertYouTubeComplianceGate: () => ({ allowed: true, blockers: [], config: TEST_YOUTUBE_COMPLIANCE_CONFIG }),
+  assertDerivedMetricsGate: () => ({ allowed: true, blockers: [], derivedMetrics: { enabled: true } })
+};
+function testWriteConsentOptions(channelId = 'UC_test_channel') {
+  return {
+    ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
+    apiClientId: TEST_YOUTUBE_COMPLIANCE_CONFIG.apiClient.id,
+    channelId,
+    getChannelId: async () => channelId,
+    getAuthorizingUserId: async () => 'test-operator',
+    getWriteActionConsent: async request => ({
+      consentId: 'test-consent-' + request.apiAction + '-' + Date.now(),
+      status: 'approved',
+      consentScope: 'single_action',
+      apiClientId: request.apiClientId,
+      channelId: request.channelId,
+      apiAction: request.apiAction,
+      capability: request.capability,
+      resourceScope: request.resourceScope,
+      authorizingUserId: request.authorizingUserId,
+      approvedBy: request.authorizingUserId,
+      approvedAt: new Date().toISOString(),
+      approvedPayloadHash: request.approvedPayloadHash,
+      approvedVisibility: request.approvedVisibility,
+      revokedAt: null,
+      consumedAt: null
+    }),
+    consumeWriteActionConsent: async () => true
+  };
+}
 const { ProductionReadinessService } = require('./utils/production-readiness-service');
 const { normalizeTags, validateYouTubeMetadata } = require('./utils/youtube-metadata-validator');
 
@@ -394,7 +426,7 @@ class SystemTest {
         throw new Error('Channel strategy was not persisted correctly');
       }
 
-      const strategyAgent = new ContentStrategyAgent(db, {});
+      const strategyAgent = new ContentStrategyAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       strategyAgent.analyzeTrends = async function() {
         this.trendingTopics = [{
           topic: 'practical AI workflows', score: 8, sources: ['trending'],
@@ -1690,15 +1722,28 @@ class SystemTest {
       }
 
       let uploadRequest;
-      const publishing = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
+      const { hashFile } = require('./utils/media-source-provenance');
+      const publishing = new PublishingSchedulingAgent(db, {}, testWriteConsentOptions('UC_test_channel'));
       publishing.youtube = {
         videos: { insert: async request => { uploadRequest = request; return { data: { id: 'provenance-video' } }; } }
+      };
+      const mediaProvenance = {
+        sourceType: 'original_created',
+        sourceRef: 'test-fixture:' + productionId,
+        creationRecordRef: 'test-fixture:' + productionId,
+        sha256: await hashFile(videoPath),
+        downloadedWithoutYouTubePriorWrittenApproval: false,
+        importedWithoutYouTubePriorWrittenApproval: false,
+        backedUpWithoutYouTubePriorWrittenApproval: false,
+        cachedWithoutYouTubePriorWrittenApproval: false,
+        storedWithoutYouTubePriorWrittenApproval: false,
+        publicYouTubeUrlIsPermissionToDownload: false
       };
       await publishing.uploadToYouTube({
         publishTime: new Date(Date.now() + 86400000).toISOString(),
         metadata: {
           seo: production.seo,
-          video: { path: videoPath },
+          video: { path: videoPath, mediaProvenance },
           privacyStatus: 'private',
           selfDeclaredMadeForKids: false,
           containsSyntheticMedia: true
@@ -2990,6 +3035,7 @@ class SystemTest {
           }]) ] }
       ];
       const service = new AudienceEngagementService(db, null, null, {
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
         listCommentThreads: async () => pages[0],
         getChannelId: async () => 'UC_channel_owner'
       });
@@ -3005,6 +3051,7 @@ class SystemTest {
 
       // Refusal policy: API failure stores nothing and rethrows
       const failing = new AudienceEngagementService(db, null, null, {
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
         listCommentThreads: async () => { throw new Error('quota exceeded'); },
         getChannelId: async () => 'UC_channel_owner'
       });
@@ -3017,6 +3064,7 @@ class SystemTest {
       const disabledError = new Error('disabled');
       disabledError.errors = [{ reason: 'commentsDisabled' }];
       const disabledService = new AudienceEngagementService(db, null, null, {
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
         listCommentThreads: async () => { throw disabledError; },
         getChannelId: async () => 'UC_channel_owner'
       });
@@ -3066,7 +3114,7 @@ class SystemTest {
       const service = new AudienceEngagementService(db, null, {
         isAvailable: () => true,
         generateText: async () => aiResponse
-      }, {});
+      }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
       const insight = await service.analyzeVideo(videoId);
       if (insight.analysisMethod !== 'ai') throw new Error('AI analysis was not recorded as ai');
@@ -3087,7 +3135,7 @@ class SystemTest {
       // Fallback: mechanical facts only, no themes
       const fallbackVideo = `${videoId}_fb`;
       await db.upsertAudienceComment({ commentId: `${fallbackVideo}_c1`, videoId: fallbackVideo, text: 'Is this real?', publishedAt: new Date().toISOString() });
-      const fallbackService = new AudienceEngagementService(db, null, { isAvailable: () => false }, {});
+      const fallbackService = new AudienceEngagementService(db, null, { isAvailable: () => false }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       const fallback = await fallbackService.analyzeVideo(fallbackVideo);
       if (fallback.analysisMethod !== 'fallback') throw new Error('Fallback method was not recorded');
       if (fallback.themes.length !== 0) throw new Error('Fallback must never invent themes');
@@ -3098,6 +3146,7 @@ class SystemTest {
       // syncDueVideos delegates and analyzes only after a fetching sync
       let analyzeCalls = 0;
       const dueService = new AudienceEngagementService(db, null, { isAvailable: () => false }, {
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
         listCommentThreads: async () => ({ items: [] })
       });
       dueService.analyzeVideo = async () => { analyzeCalls++; };
@@ -3126,7 +3175,7 @@ class SystemTest {
           text: `Please cover local caching next (${suffix})`, publishedAt: new Date().toISOString()
         });
       }
-      const service = new AudienceEngagementService(db, null, null, {});
+      const service = new AudienceEngagementService(db, null, null, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       const insight = {
         videoId, title: 'Mining test', analysisMethod: 'ai',
         themes: [
@@ -3189,7 +3238,7 @@ class SystemTest {
             { commentId: `${videoId}_scam1`, reply: 'Should never appear', rationale: 'Quarantined' }
           ]);
         }
-      }, {});
+      }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
       const drafts = await service.draftReplies(videoId);
       if (drafts.length !== 1) throw new Error(`Expected 1 usable draft (link + quarantined dropped), got ${drafts.length}`);
@@ -3198,7 +3247,7 @@ class SystemTest {
         throw new Error('Quarantined, owner, and nested comments must never reach the draft prompt');
       }
 
-      const noAI = new AudienceEngagementService(db, null, { isAvailable: () => false }, {});
+      const noAI = new AudienceEngagementService(db, null, { isAvailable: () => false }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       let status = 0;
       try { await noAI.draftReplies(videoId); } catch (error) { status = error.status; }
       if (status !== 503) throw new Error('Drafting without AI must throw 503');
@@ -3228,6 +3277,7 @@ class SystemTest {
       let draft = await makeDraft();
       const posts = [];
       const service = new AudienceEngagementService(db, scopedCredentials, null, {
+        ...testWriteConsentOptions('UC_channel_owner'),
         insertComment: async ({ parentId, text }) => { posts.push({ parentId, text }); return { id: 'yt_posted_1' }; }
       });
 
@@ -3235,7 +3285,7 @@ class SystemTest {
       try { await service.approveReplyDraft(draft.id, {}); } catch (error) { code = error.code; }
       if (code !== 'REPLY_APPROVAL_REQUIRED') throw new Error('Approval must require confirmed: true');
 
-      const unscoped = new AudienceEngagementService(db, { hasYouTubeScope: () => false }, null, {});
+      const unscoped = new AudienceEngagementService(db, { hasYouTubeScope: () => false }, null, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       code = null;
       try { await unscoped.approveReplyDraft(draft.id, { confirmed: true }); } catch (error) { code = error.code; }
       if (code !== 'REPLY_SCOPE_REQUIRED') throw new Error('Missing force-ssl scope must block posting');
@@ -3258,6 +3308,7 @@ class SystemTest {
       await db.upsertAudienceComment({ commentId: failingComment, videoId, text: 'Other?', publishedAt: new Date().toISOString() });
       const failDraft = await db.saveReplyDraft({ commentId: failingComment, videoId, draftText: 'Will fail' });
       const failing = new AudienceEngagementService(db, scopedCredentials, null, {
+        ...testWriteConsentOptions('UC_channel_owner'),
         insertComment: async () => { throw new Error('commentThreadNotFound'); }
       });
       status = null;
@@ -3267,7 +3318,7 @@ class SystemTest {
       if (failed.status !== 'failed' || !failed.failureReason.includes('commentThreadNotFound')) throw new Error('Failure evidence missing');
 
       // Daily cap
-      const capped = new AudienceEngagementService(db, scopedCredentials, null, { dailyReplyCap: 1, insertComment: async () => ({ id: 'x' }) });
+      const capped = new AudienceEngagementService(db, scopedCredentials, null, { ...testWriteConsentOptions('UC_channel_owner'), dailyReplyCap: 1, insertComment: async () => ({ id: 'x' }) });
       status = null;
       try { await capped.approveReplyDraft(failDraft.id, { confirmed: true }); } catch (error) { status = error.status; }
       if (status !== 429) throw new Error('The daily reply cap must block further posts');
