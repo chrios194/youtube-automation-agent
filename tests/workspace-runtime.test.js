@@ -368,6 +368,7 @@ test('strict workspace secret reads reject files with group or world permissions
   try {
     const accountRoot = path.join(fixtureDir, 'runtime', 'account-a');
     const configDir = path.join(accountRoot, 'config');
+    fs.mkdirSync(accountRoot, { recursive: true, mode: 0o700 });
     const runtime = { enabled: true, strictMode: true, accountId: 'account-a', accountRoot, configDir };
     const secretPath = path.join(configDir, 'tokens.json');
     const masterKey = 'p'.repeat(32);
