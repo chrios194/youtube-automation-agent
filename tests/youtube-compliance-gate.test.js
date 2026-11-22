@@ -7,6 +7,8 @@ const {
   getYouTubeComplianceState,
   assertYouTubeComplianceGate,
   assertMadeForKidsDeclaration,
+  getDerivedMetricsGateState,
+  assertDerivedMetricsGate,
   REQUIRED_API_DATA_POLICY,
   REQUIRED_API_DATA_VERIFICATION
 } = require('../utils/youtube-compliance-gate');
@@ -71,7 +73,8 @@ function approvedConfig() {
       crossChannelAggregationEvidenceRef: 'test:cross-channel-disabled',
       crossContentOwnerAggregationEvidenceRef: 'test:cross-content-owner-disabled',
       verifiedAt: new Date().toISOString()
-    }
+    },
+    derivedMetrics: structuredClone(base.apiDataHandling.derivedMetrics)
   };
   config.apiDataAccessReview = {
     status: 'approved',
@@ -81,6 +84,13 @@ function approvedConfig() {
     captionsListReturnsMetadataOnly: true,
     captionsDownloadRequiresVideoEditPermission: true,
     captionsDownloadIsGeneralPublicTranscriptSource: false,
+    youtubeAudiovisualContentDownloadedWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentImportedWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentBackedUpWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentCachedWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentStoredWithoutPriorWrittenApproval: false,
+    assetSourceProvenanceRequired: true,
+    youtubePublicUrlIsPermissionToDownload: false,
     reviewedCommitSha: 'a'.repeat(40),
     evidenceRef: 'test:youtube-data-access-method-review',
     reviewedAt: new Date().toISOString()
@@ -329,4 +339,98 @@ test('Analytics/Reporting statistics exception requires active consent and 30-da
   assert.ok(state.blockers.some(item => item.includes('analyticsReportingStatisticsRetentionExceptionRequiresActiveUserConsent')));
   assert.ok(state.blockers.some(item => item.includes('analyticsReportingVideoExistenceRecheckDays')));
   assert.ok(state.blockers.some(item => item.includes('analyticsReportingVideoExistenceRecheckStatus')));
+});
+
+
+test('YouTube API Data-derived metrics are disabled by default', () => {
+  const config = approvedConfig();
+  const state = getDerivedMetricsGateState(config.apiDataHandling);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('disabled by default')));
+  assert.throws(
+    () => assertDerivedMetricsGate('analytics scores', { config }),
+    error => error.code === 'YOUTUBE_DERIVED_METRICS_GATE_BLOCKED'
+  );
+  assert.equal(getYouTubeComplianceState(config).allowed, true);
+});
+
+test('derived metrics require the current amendment, Analytics & Reporting audit, standard quota extension, and specific storage approval', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.derivedMetrics.enabled = true;
+  config.apiDataHandling.derivedMetrics.exceptionEnabled = true;
+  const blocked = getDerivedMetricsGateState(config.apiDataHandling);
+  assert.equal(blocked.allowed, false);
+  assert.ok(blocked.blockers.some(item => item.includes('amendment')));
+  assert.ok(blocked.blockers.some(item => item.includes('Analytics & Reporting')));
+  assert.ok(blocked.blockers.some(item => item.includes('compliance audit')));
+  assert.ok(blocked.blockers.some(item => item.includes('standard quota extension')));
+  assert.ok(blocked.blockers.some(item => item.includes('approved metric allowlist')));
+});
+
+test('only a fully evidenced, allowlisted derived-metrics exception can pass and storage cannot exceed 36 months', () => {
+  const config = approvedConfig();
+  Object.assign(config.apiDataHandling.derivedMetrics, {
+    enabled: true,
+    exceptionEnabled: true,
+    additionalPoliciesAmendmentAccepted: true,
+    useCase: 'Analytics & Reporting',
+    auditStatus: 'approved',
+    auditEvidenceRef: 'audit:analytics-reporting',
+    standardQuotaExtensionStatus: 'approved',
+    standardQuotaExtensionEvidenceRef: 'quota:approved-specific-metrics',
+    approvedMetricNames: ['approved_metric_a', 'approved_metric_b'],
+    approvedStorageUseRef: 'storage:approved-use',
+    distinguishFromRawApiData: true,
+    maxStorageMonths: 36,
+    crossChannelAggregationAllowed: false,
+    crossContentOwnerAggregationAllowed: false,
+    centralLeaderboardApiDataAllowed: false
+  });
+  const state = getDerivedMetricsGateState(config.apiDataHandling);
+  assert.equal(state.allowed, true);
+  assert.equal(assertDerivedMetricsGate('approved metrics', { config }).allowed, true);
+  config.apiDataHandling.derivedMetrics.maxStorageMonths = 37;
+  const overLimit = getDerivedMetricsGateState(config.apiDataHandling);
+  assert.equal(overLimit.allowed, false);
+  assert.ok(overLimit.blockers.some(item => item.includes('no more than 36 calendar months')));
+});
+
+test('central leaderboards can use only independently generated non-YouTube operational metrics', () => {
+  const config = approvedConfig();
+  config.apiDataHandling.policy.centralLeaderboardApiDataAllowed = true;
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('centralLeaderboardApiDataAllowed')));
+  config = approvedConfig();
+  config.apiDataHandling.policy.centralLeaderboardSource = 'youtube_api_data';
+  assert.equal(getYouTubeComplianceState(config).allowed, false);
+});
+
+test('YouTube audiovisual copies, undocumented sources, and missing media provenance block API access', () => {
+  for (const field of [
+    'youtubeAudiovisualContentDownloadedWithoutPriorWrittenApproval',
+    'youtubeAudiovisualContentImportedWithoutPriorWrittenApproval',
+    'youtubeAudiovisualContentBackedUpWithoutPriorWrittenApproval',
+    'youtubeAudiovisualContentCachedWithoutPriorWrittenApproval',
+    'youtubeAudiovisualContentStoredWithoutPriorWrittenApproval'
+  ]) {
+    const config = approvedConfig();
+    config.apiDataAccessReview[field] = true;
+    assert.ok(getYouTubeComplianceState(config).blockers.some(item => item.includes(field)));
+  }
+  const config = approvedConfig();
+  config.apiDataAccessReview.assetSourceProvenanceRequired = false;
+  assert.ok(getYouTubeComplianceState(config).blockers.some(item => item.includes('assetSourceProvenanceRequired')));
+});
+
+test('per-action consent, user-controlled submitted values, and no automated engagement are mandatory', () => {
+  const config = approvedConfig();
+  config.controls.writeActionConsentRequiredPerApiAction = false;
+  config.controls.finalSubmittedValuesUserControlled = false;
+  config.controls.automatedEngagementManipulationAllowed = true;
+  const state = getYouTubeComplianceState(config);
+  assert.equal(state.allowed, false);
+  assert.ok(state.blockers.some(item => item.includes('prior specific express user consent')));
+  assert.ok(state.blockers.some(item => item.includes('final control')));
+  assert.ok(state.blockers.some(item => item.includes('engagement manipulation')));
 });
