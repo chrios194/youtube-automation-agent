@@ -104,6 +104,10 @@ async function resolveWorkspaceSecretPath(filePath, runtime, masterKey, { create
   if (!runtime.accountRoot) {
     throw new Error('Workspace secret storage requires an explicit account runtime root');
   }
+  if (createParent) {
+    await fs.mkdir(accountRoot, { recursive: true, mode: 0o700 });
+    await fs.chmod(accountRoot, 0o700);
+  }
 
   const realAccountRoot = await fs.realpath(accountRoot);
   if (realAccountRoot !== accountRoot) {
