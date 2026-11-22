@@ -122,7 +122,9 @@ async function requireWriteActionConsent(input = {}) {
     apiAction: expected.apiAction,
     capability: expected.capability,
     resourceScope: expected.resourceScope,
-    authorizingUserId: expected.authorizingUserId
+    authorizingUserId: expected.authorizingUserId,
+    approvedPayloadHash: hashWritePayload(expected.payload),
+    approvedVisibility: expected.visibility == null ? null : expected.visibility
   });
   const validated = validateWriteActionConsent(consent, expected, { now });
   const consumed = await consumeConsent(consent.consentId, {
