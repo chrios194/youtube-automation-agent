@@ -848,6 +848,8 @@ class AnalyticsOptimizationAgent {
   }
 
   getLearningSummary() {
+    this.assertYouTubeComplianceGate('YouTube API Data learning-summary access');
+    this.assertDerivedMetricsGate('YouTube API Data-derived channel learning');
     return this.learning.getSummary();
   }
 
