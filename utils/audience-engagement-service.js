@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const { Logger } = require('./logger');
+const { getYouTubeComplianceState, assertYouTubeComplianceGate, assertDerivedMetricsGate } = require('./youtube-compliance-gate');
+const { requireWriteActionConsent } = require('./youtube-write-action-consent');
 
 const FORCE_SSL_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
 const COMMENT_FLAGS = ['question', 'request', 'praise', 'correction', 'spam', 'scam', 'toxic'];
@@ -20,10 +22,19 @@ class AudienceEngagementService {
     this.listCommentThreads = options.listCommentThreads || (params => this.defaultListCommentThreads(params));
     this.insertComment = options.insertComment || (params => this.defaultInsertComment(params));
     this.getChannelId = options.getChannelId || (() => this.defaultGetChannelId());
+    this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    this.assertDerivedMetricsGate = options.assertDerivedMetricsGate || assertDerivedMetricsGate;
+    this.getWriteActionConsent = options.getWriteActionConsent || null;
+    this.consumeWriteActionConsent = options.consumeWriteActionConsent || null;
+    this.getAuthorizingUserId = options.getAuthorizingUserId || null;
+    const initialCompliance = this.getYouTubeComplianceState();
+    this.apiClientId = options.apiClientId || initialCompliance.config?.apiClient?.id || null;
     this.channelId = null;
   }
 
   async defaultListCommentThreads({ videoId, pageToken }) {
+    this.assertYouTubeComplianceGate('YouTube comment API Data collection');
     const youtube = this.credentials.getYouTubeClient();
     const response = await youtube.commentThreads.list({
       part: ['snippet', 'replies'],
@@ -36,6 +47,7 @@ class AudienceEngagementService {
   }
 
   async defaultInsertComment({ parentId, text }) {
+    this.assertYouTubeComplianceGate('YouTube comment reply write');
     const youtube = this.credentials.getYouTubeClient();
     const response = await youtube.comments.insert({
       part: ['snippet'],
@@ -45,6 +57,7 @@ class AudienceEngagementService {
   }
 
   async defaultGetChannelId() {
+    this.assertYouTubeComplianceGate('YouTube channel identity API Data access');
     const youtube = this.credentials.getYouTubeClient();
     const response = await youtube.channels.list({ part: ['id'], mine: true });
     return response.data?.items?.[0]?.id || null;
@@ -118,6 +131,7 @@ class AudienceEngagementService {
   // still records the newest comment as the watermark, so the older backlog beyond that cap is
   // never backfilled by later runs.
   async syncVideoComments(videoId, meta = {}) {
+    this.assertYouTubeComplianceGate('YouTube comment API Data collection');
     const existing = await this.db.getEngagementInsight(videoId);
     const watermark = existing?.newestCommentAt ? new Date(existing.newestCommentAt) : null;
     const channelId = await this.resolveChannelId();
@@ -232,6 +246,8 @@ Comments: ${JSON.stringify(payload)}`;
   }
 
   async analyzeVideo(videoId) {
+    this.assertYouTubeComplianceGate('YouTube comment API Data access');
+    this.assertDerivedMetricsGate('YouTube comment sentiment and theme analysis');
     // Top-level comments claim the analysis budget first; replies fill any remaining room.
     const selected = await this.db.listAudienceComments({ videoId, topLevelOnly: true, limit: this.maxCommentsPerAnalysis });
     if (selected.length < this.maxCommentsPerAnalysis) {
@@ -410,6 +426,8 @@ Comments: ${JSON.stringify(payload)}`;
   }
 
   async draftReplies(videoId, input = {}) {
+    this.assertYouTubeComplianceGate('YouTube comment API Data access for reply drafting');
+    this.assertDerivedMetricsGate('YouTube comment-derived reply drafting');
     if (!this.aiTextService?.isAvailable?.()) {
       const error = new Error('Reply drafting requires a configured AI text provider');
       error.status = 503;
@@ -458,6 +476,11 @@ Comments: ${JSON.stringify(payload)}`;
   }
 
   postingEnabled() {
+    const compliance = this.getYouTubeComplianceState();
+    if (!compliance.allowed) return { enabled: false, reason: 'youtube_compliance_gate_blocked' };
+    if (typeof this.getWriteActionConsent !== 'function' || typeof this.consumeWriteActionConsent !== 'function' || typeof this.getAuthorizingUserId !== 'function' || !this.apiClientId) {
+      return { enabled: false, reason: 'per_action_user_consent_provider_unavailable' };
+    }
     if (!this.credentials?.hasYouTubeScope) return { enabled: false, reason: 'credentials_unavailable' };
     if (!this.credentials.hasYouTubeScope(FORCE_SSL_SCOPE)) return { enabled: false, reason: 'missing_scope' };
     return { enabled: true, reason: null };
@@ -498,6 +521,7 @@ Comments: ${JSON.stringify(payload)}`;
   }
 
   async approveReplyDraft(draftId, input = {}) {
+    this.assertYouTubeComplianceGate('YouTube comment reply write');
     if (input.confirmed !== true) {
       const error = new Error('Confirm the reply text before posting to YouTube');
       error.status = 409;
@@ -532,6 +556,20 @@ Comments: ${JSON.stringify(payload)}`;
       draft = await this.db.updateReplyDraft(draftId, { editedText: input.editedText.trim().slice(0, 1000) });
     }
     const text = (draft.editedText || draft.draftText || '').trim();
+    const channelId = await this.resolveChannelId();
+    const authorizingUserId = await this.getAuthorizingUserId();
+    await requireWriteActionConsent({
+      getConsent: this.getWriteActionConsent,
+      consumeConsent: this.consumeWriteActionConsent,
+      apiClientId: this.apiClientId,
+      channelId,
+      apiAction: 'comments.insert',
+      capability: 'youtube.comment.reply',
+      resourceScope: channelId + ':comment:' + draft.commentId,
+      authorizingUserId,
+      payload: { parentId: draft.commentId, text },
+      visibility: null
+    });
     try {
       const posted = await this.insertComment({ parentId: draft.commentId, text });
       if (!posted?.id) throw new Error('YouTube did not return a comment id for the posted reply');
