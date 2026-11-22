@@ -13,7 +13,7 @@
   },
   "boundaryReview": {
     "status": "identified_pending_deployment_and_child_audience_review",
-    "reviewedAt": "2026-11-21",
+    "reviewedAt": "2026-11-23",
     "evidenceRefs": [
       "README.md: AgentTube creator-business operating system and operator workflow",
       "docs/multi-account-workspaces.md: one AgentTube product launches isolated account processes",
@@ -109,7 +109,34 @@
       "centralDashboardApiDataVisibility": "none",
       "centralDashboardOperationalMetadataOnly": true,
       "crossChannelAggregationDisabledVerificationRequired": true,
-      "crossContentOwnerAggregationDisabledVerificationRequired": true
+      "crossContentOwnerAggregationDisabledVerificationRequired": true,
+      "centralLeaderboardApiDataAllowed": false,
+      "centralLeaderboardSource": "independently_generated_non_youtube_operational_metrics_only",
+      "centralLeaderboardMustNotUseYouTubeApiData": true,
+      "derivedMetricsFromApiDataEnabledByDefault": false,
+      "derivedMetricsExceptionRequiresAdditionalPoliciesAmendmentAcceptance": true,
+      "derivedMetricsExceptionRequiresAnalyticsReportingUseCase": true,
+      "derivedMetricsExceptionRequiresComplianceAuditApproval": true,
+      "derivedMetricsExceptionRequiresStandardQuotaExtensionApproval": true,
+      "derivedMetricsExceptionRequiresSpecificMetricsAndStorageApproval": true,
+      "derivedMetricsExceptionMaxStorageMonths": 36,
+      "derivedMetricsMustBeDistinguishedFromRawApiData": true,
+      "audiovisualContentDownloadWithoutPriorWrittenApprovalAllowed": false,
+      "audiovisualContentImportWithoutPriorWrittenApprovalAllowed": false,
+      "audiovisualContentBackupWithoutPriorWrittenApprovalAllowed": false,
+      "audiovisualContentCacheWithoutPriorWrittenApprovalAllowed": false,
+      "audiovisualContentStorageWithoutPriorWrittenApprovalAllowed": false,
+      "audiovisualContentPriorWrittenApprovalRequired": true,
+      "audiovisualAssetSourceProvenanceRequired": true,
+      "audiovisualAssetsLimitedToOriginalUserSuppliedOrRightsHolderSources": true,
+      "youtubePublicUrlIsPermissionToDownload": false,
+      "youtubeWriteActionsRequirePriorSpecificExpressUserConsent": true,
+      "writeActionConsentRequiredPerApiAction": true,
+      "userControlsFinalSubmittedValues": true,
+      "submittedValuesLockedAfterApproval": true,
+      "renewedConsentRequiredAfterAnySubmittedValueChange": true,
+      "automatedEngagementManipulationAllowed": false,
+      "childDirectedApiClientWriteActionsAllowed": false
     },
     "verification": {
       "storageInventoryStatus": "not_verified",
@@ -137,6 +164,25 @@
       "crossChannelAggregationEvidenceRef": null,
       "crossContentOwnerAggregationStatus": "not_verified",
       "crossContentOwnerAggregationEvidenceRef": null
+    },
+    "derivedMetrics": {
+      "enabled": false,
+      "exceptionEnabled": false,
+      "additionalPoliciesAmendmentAccepted": false,
+      "additionalPoliciesAmendmentName": "Additional policies for derived metrics and data storage",
+      "additionalPoliciesAmendmentSection": "Section 5: Use Cases, API Integration, and Feature Implementation",
+      "useCase": null,
+      "auditStatus": "not_started",
+      "auditEvidenceRef": null,
+      "standardQuotaExtensionStatus": "not_started",
+      "standardQuotaExtensionEvidenceRef": null,
+      "approvedMetricNames": [],
+      "approvedStorageUseRef": null,
+      "distinguishFromRawApiData": true,
+      "maxStorageMonths": 36,
+      "crossChannelAggregationAllowed": false,
+      "crossContentOwnerAggregationAllowed": false,
+      "centralLeaderboardApiDataAllowed": false
     }
   },
   "controls": {
@@ -145,7 +191,13 @@
     "publishingAllowed": false,
     "quotaShardingAllowed": false,
     "perChannelProjectCreationAllowed": false,
-    "madeForKidsDeclarationRequiredPerVideo": true
+    "madeForKidsDeclarationRequiredPerVideo": true,
+    "writeActionConsentRequiredPerApiAction": true,
+    "automatedEngagementManipulationAllowed": false,
+    "childDirectedApiClientWriteActionsAllowed": false,
+    "finalSubmittedValuesUserControlled": true,
+    "renewedConsentRequiredAfterAnySubmittedValueChange": true,
+    "audiovisualSourceProvenanceRequired": true
   },
   "apiDataAccessReview": {
     "status": "not_reviewed",
@@ -157,6 +209,13 @@
     "captionsDownloadIsGeneralPublicTranscriptSource": null,
     "reviewedCommitSha": null,
     "evidenceRef": null,
-    "reviewedAt": null
+    "reviewedAt": null,
+    "youtubeAudiovisualContentDownloadedWithoutPriorWrittenApproval": null,
+    "youtubeAudiovisualContentImportedWithoutPriorWrittenApproval": null,
+    "youtubeAudiovisualContentBackedUpWithoutPriorWrittenApproval": null,
+    "youtubeAudiovisualContentCachedWithoutPriorWrittenApproval": null,
+    "youtubeAudiovisualContentStoredWithoutPriorWrittenApproval": null,
+    "assetSourceProvenanceRequired": true,
+    "youtubePublicUrlIsPermissionToDownload": false
   }
 }
