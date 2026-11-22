@@ -540,9 +540,19 @@ Comments: ${JSON.stringify(payload)}`;
     }
     const posting = this.postingEnabled();
     if (!posting.enabled) {
-      const error = new Error('Posting requires re-authorizing YouTube with the comment permission. Run npm run walkthrough to re-connect.');
+      const error = new Error(
+        posting.reason === 'missing_scope'
+          ? 'Posting requires the YouTube comment permission.'
+          : posting.reason === 'youtube_compliance_gate_blocked'
+            ? 'Posting is blocked until deployed YouTube API Data controls are verified.'
+            : 'Posting is blocked until a persistent, one-use, exact-text user-consent provider is configured.'
+      );
       error.status = 409;
-      error.code = 'REPLY_SCOPE_REQUIRED';
+      error.code = posting.reason === 'missing_scope'
+        ? 'REPLY_SCOPE_REQUIRED'
+        : posting.reason === 'youtube_compliance_gate_blocked'
+          ? 'YOUTUBE_COMPLIANCE_GATE_BLOCKED'
+          : 'YOUTUBE_WRITE_ACTION_CONSENT_REQUIRED';
       throw error;
     }
     const since = new Date(Date.now() - 86400000).toISOString();
