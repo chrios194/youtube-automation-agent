@@ -3147,7 +3147,8 @@ class SystemTest {
       let analyzeCalls = 0;
       const dueService = new AudienceEngagementService(db, null, { isAvailable: () => false }, {
         ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
-        listCommentThreads: async () => ({ items: [] })
+        listCommentThreads: async () => ({ items: [] }),
+        getChannelId: async () => 'UC_channel_owner'
       });
       dueService.analyzeVideo = async () => { analyzeCalls++; };
       const results = await dueService.syncDueVideos([
