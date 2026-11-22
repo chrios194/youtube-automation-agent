@@ -362,6 +362,26 @@ test('strict workspace secret storage rejects symlinked secret files and config 
   }
 });
 
+
+test('strict workspace secret reads reject files with group or world permissions', async () => {
+  const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'secret-mode-rejection-'));
+  try {
+    const accountRoot = path.join(fixtureDir, 'runtime', 'account-a');
+    const configDir = path.join(accountRoot, 'config');
+    const runtime = { enabled: true, strictMode: true, accountId: 'account-a', accountRoot, configDir };
+    const secretPath = path.join(configDir, 'tokens.json');
+    const masterKey = 'p'.repeat(32);
+    await writeWorkspaceSecretFile(secretPath, { youtube: { refresh_token: 'secret' } }, runtime, masterKey);
+    fs.chmodSync(secretPath, 0o644);
+    await assert.rejects(
+      () => readWorkspaceSecretFile(secretPath, runtime, masterKey),
+      /permissions must be restricted/
+    );
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
 test('strict workspace stores encrypted YouTube tokens only under the account config directory', async () => {
   const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'encrypted-token-isolation-'));
   try {
@@ -384,6 +404,8 @@ test('strict workspace stores encrypted YouTube tokens only under the account co
 
     const encrypted = fs.readFileSync(tokensPath, 'utf8');
     assert.doesNotMatch(encrypted, /account-a-refresh-token/);
+    assert.equal(fs.statSync(tokensPath).mode & 0o777, 0o600);
+    assert.deepEqual(fs.readdirSync(configDir), ['tokens.json']);
 
     const reader = new CredentialManager({ runtime, tokensPath, masterKey });
     await reader.loadTokens();
