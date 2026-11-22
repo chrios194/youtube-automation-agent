@@ -401,9 +401,9 @@ test('central leaderboards can use only independently generated non-YouTube oper
   const state = getYouTubeComplianceState(config);
   assert.equal(state.allowed, false);
   assert.ok(state.blockers.some(item => item.includes('centralLeaderboardApiDataAllowed')));
-  config = approvedConfig();
-  config.apiDataHandling.policy.centralLeaderboardSource = 'youtube_api_data';
-  assert.equal(getYouTubeComplianceState(config).allowed, false);
+  const wrongSource = approvedConfig();
+  wrongSource.apiDataHandling.policy.centralLeaderboardSource = 'youtube_api_data';
+  assert.equal(getYouTubeComplianceState(wrongSource).allowed, false);
 });
 
 test('YouTube audiovisual copies, undocumented sources, and missing media provenance block API access', () => {
