@@ -5,6 +5,8 @@ const path = require('path');
 const { Logger } = require('../utils/logger');
 const { assertValidYouTubeMetadata } = require('../utils/youtube-metadata-validator');
 const { getYouTubeComplianceState, assertYouTubeComplianceGate, assertMadeForKidsDeclaration } = require('../utils/youtube-compliance-gate');
+const { requireWriteActionConsent, hashWritePayload } = require('../utils/youtube-write-action-consent');
+const { verifyMediaSourceProvenance } = require('../utils/media-source-provenance');
 
 class PublishingSchedulingAgent {
   constructor(db, credentials, options = {}) {
@@ -15,7 +17,30 @@ class PublishingSchedulingAgent {
     this.publishQueue = [];
     this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
     this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    this.getWriteActionConsent = options.getWriteActionConsent || null;
+    this.consumeWriteActionConsent = options.consumeWriteActionConsent || null;
+    this.getAuthorizingUserId = options.getAuthorizingUserId || null;
+    this.apiClientId = options.apiClientId || this.getYouTubeComplianceState().config?.apiClient?.id || null;
+    this.channelId = options.channelId || process.env.YOUTUBE_CHANNEL_ID || process.env.AIOS_YOUTUBE_CHANNEL_ID || null;
     this.complianceBlocked = false;
+  }
+
+  async requireWriteActionConsent(apiAction, capability, resourceScope, payload, visibility = null) {
+    const authorizingUserId = typeof this.getAuthorizingUserId === 'function'
+      ? await this.getAuthorizingUserId()
+      : null;
+    return requireWriteActionConsent({
+      getConsent: this.getWriteActionConsent,
+      consumeConsent: this.consumeWriteActionConsent,
+      apiClientId: this.apiClientId,
+      channelId: this.channelId,
+      apiAction,
+      capability,
+      resourceScope,
+      authorizingUserId,
+      payload,
+      visibility
+    });
   }
 
   async initialize() {
@@ -91,6 +116,7 @@ class PublishingSchedulingAgent {
           seo: productionData.seo,
           thumbnail: productionData.assets.thumbnail,
           video: productionData.assets.finalVideo,
+          mediaProvenance: productionData.assets.finalVideo.mediaProvenance || null,
           audio: productionData.assets.audio,
           captions: productionData.assets.captions,
           privacyStatus: productionData.privacyStatus || process.env.DEFAULT_PRIVACY_STATUS || 'private',
@@ -186,6 +212,11 @@ class PublishingSchedulingAgent {
           await this.syncShortStatus(scheduleEntry, 'reconciliation_required', scheduleEntry.error);
           error.code = 'UPLOAD_OUTCOME_UNKNOWN';
           error.status = 409;
+        } else if (error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) {
+          scheduleEntry.status = 'scheduled';
+          scheduleEntry.error = 'Waiting for fresh, explicit, single-action user consent';
+          await this.db.updateScheduleEntry(scheduleEntry);
+          await this.syncShortStatus(scheduleEntry, 'scheduled', scheduleEntry.error);
         } else {
           scheduleEntry.status = 'failed';
           scheduleEntry.error = error.message;
@@ -243,7 +274,22 @@ class PublishingSchedulingAgent {
       }
     };
     
-    // Resolve the file before marking the network upload as attempted.
+    const mediaCheck = await verifyMediaSourceProvenance(metadata.video.mediaProvenance || metadata.mediaProvenance, metadata.video.path);
+    if (!mediaCheck.valid) {
+      const error = new Error('YouTube upload is blocked until the exact source media, license/permission, and file hash are verified: ' + mediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
+      throw error;
+    }
+    await this.requireWriteActionConsent(
+      'videos.insert',
+      'youtube.publish',
+      this.channelId + ':new-video',
+      { videoMetadata, mediaSha256: mediaCheck.sha256 },
+      videoMetadata.status.privacyStatus
+    );
+
+    // Resolve the file only after the exact submitted values and media bytes have consent.
     const videoStream = await this.getVideoStream(metadata.video.path);
     scheduleEntry.uploadAttempted = true;
     const videoUpload = await this.youtube.videos.insert({
@@ -262,14 +308,28 @@ class PublishingSchedulingAgent {
     scheduleEntry.error = null;
     await this.db.updateScheduleEntry(scheduleEntry);
     
-    // Upload thumbnail
+    // Thumbnail and captions are separate YouTube write actions; never inherit video-upload consent.
     if (metadata.thumbnail && metadata.thumbnail.path) {
-      await this.uploadThumbnail(videoId, metadata.thumbnail.path);
+      try {
+        await this.uploadThumbnail(videoId, metadata.thumbnail.path, metadata.thumbnail.mediaProvenance);
+      } catch (error) {
+        if (error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) {
+          this.logger.warn('Thumbnail upload skipped because it has no separate, exact user consent');
+        } else {
+          throw error;
+        }
+      }
     }
-    
-    // Upload captions
     if (metadata.captions && metadata.captions.path) {
-      await this.uploadCaptions(videoId, metadata.captions.path);
+      try {
+        await this.uploadCaptions(videoId, metadata.captions.path);
+      } catch (error) {
+        if (error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) {
+          this.logger.warn('Captions upload skipped because it has no separate, exact user consent');
+        } else {
+          throw error;
+        }
+      }
     }
     
     return videoUpload.data;
@@ -341,31 +401,44 @@ class PublishingSchedulingAgent {
       throw new Error('video file not found — refusing to upload placeholder');
     }
   }
-  async uploadThumbnail(videoId, thumbnailPath) {
+  async uploadThumbnail(videoId, thumbnailPath, mediaProvenance) {
     this.assertYouTubeComplianceGate('YouTube thumbnail upload');
-    try {
-      const thumbnailBuffer = await fs.readFile(thumbnailPath);
-      
-      await this.youtube.thumbnails.set({
-        videoId: videoId,
-        media: {
-          body: thumbnailBuffer
-        }
-      });
-      
-      this.logger.info(`Thumbnail uploaded for video: ${videoId}`);
-    } catch (error) {
-      this.logger.error(`Failed to upload thumbnail: ${error.message}`);
+    const mediaCheck = await verifyMediaSourceProvenance(mediaProvenance, thumbnailPath);
+    if (!mediaCheck.valid) {
+      const error = new Error('Thumbnail upload is blocked until source rights/provenance and file hash are verified: ' + mediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
+      throw error;
     }
+    const thumbnailBuffer = await fs.readFile(thumbnailPath);
+    await this.requireWriteActionConsent(
+      'thumbnails.set',
+      'youtube.thumbnail.upload',
+      this.channelId + ':video:' + videoId + ':thumbnail',
+      { videoId, mediaSha256: mediaCheck.sha256 },
+      null
+    );
+    await this.youtube.thumbnails.set({
+      videoId,
+      media: { body: thumbnailBuffer }
+    });
+    this.logger.info(`Thumbnail uploaded for video: ${videoId}`);
   }
 
-  async applyVideoPackaging(videoId, packaging = {}, previousPackaging = null) {
+  async applyVideoPackaging(videoId, packaging = {}) {
     this.assertYouTubeComplianceGate('YouTube video packaging update');
     const title = String(packaging.title || '').trim();
     if (!videoId || !title || title.length > 100 || !packaging.thumbnailPath) {
       const error = new Error('A valid video ID, title, and thumbnail are required for a packaging change');
       error.status = 400;
       error.code = 'PACKAGING_INVALID';
+      throw error;
+    }
+    const mediaCheck = await verifyMediaSourceProvenance(packaging.thumbnailMediaProvenance, packaging.thumbnailPath);
+    if (!mediaCheck.valid) {
+      const error = new Error('Packaging update is blocked until thumbnail source rights/provenance and file hash are verified: ' + mediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
       throw error;
     }
     const thumbnail = await fs.readFile(packaging.thumbnailPath);
@@ -377,64 +450,68 @@ class PublishingSchedulingAgent {
       error.code = 'PACKAGING_VIDEO_NOT_FOUND';
       throw error;
     }
-
-    const updateTitle = async nextTitle => this.youtube.videos.update({
-      part: 'snippet',
-      requestBody: {
-        id: videoId,
-        snippet: {
-          title: nextTitle,
-          description: snippet.description || '',
-          tags: snippet.tags || [],
-          categoryId: snippet.categoryId || '22',
-          defaultLanguage: snippet.defaultLanguage,
-          defaultAudioLanguage: snippet.defaultAudioLanguage
-        }
+    const requestBody = {
+      id: videoId,
+      snippet: {
+        title,
+        description: snippet.description || '',
+        tags: snippet.tags || [],
+        categoryId: snippet.categoryId || '22',
+        defaultLanguage: snippet.defaultLanguage,
+        defaultAudioLanguage: snippet.defaultAudioLanguage
       }
-    });
-
-    await updateTitle(title);
+    };
+    await this.requireWriteActionConsent(
+      'videos.update',
+      'youtube.schedule',
+      this.channelId + ':video:' + videoId,
+      { part: 'snippet', requestBody },
+      null
+    );
+    await this.requireWriteActionConsent(
+      'thumbnails.set',
+      'youtube.thumbnail.upload',
+      this.channelId + ':video:' + videoId + ':thumbnail',
+      { videoId, mediaSha256: mediaCheck.sha256 },
+      null
+    );
+    await this.youtube.videos.update({ part: 'snippet', requestBody });
     try {
-      await this.youtube.thumbnails.set({
-        videoId,
-        media: { body: thumbnail }
-      });
+      await this.youtube.thumbnails.set({ videoId, media: { body: thumbnail } });
     } catch (error) {
-      try {
-        await updateTitle(String(previousPackaging?.title || snippet.title || '').trim());
-      } catch (rollbackError) {
-        error.message = `${error.message}; title rollback also failed: ${rollbackError.message}`;
-      }
+      error.status = error.status || 502;
+      error.code = 'PACKAGING_PARTIAL_UPDATE';
+      error.message = 'The title update was approved and applied, but the separately approved thumbnail update failed: ' + error.message;
       throw error;
     }
-    this.logger.info(`Applied approved growth-experiment packaging to video: ${videoId}`);
+    this.logger.info(`Applied separately approved packaging actions to video: ${videoId}`);
     return { videoId, title, thumbnailPath: packaging.thumbnailPath };
   }
 
   async uploadCaptions(videoId, captionsPath) {
     this.assertYouTubeComplianceGate('YouTube captions upload');
-    try {
-      const captionsContent = await fs.readFile(captionsPath, 'utf8');
-      
-      await this.youtube.captions.insert({
-        part: 'snippet',
-        requestBody: {
-          snippet: {
-            videoId: videoId,
-            language: 'en',
-            name: 'English Captions',
-            isDraft: false
-          }
-        },
-        media: {
-          body: captionsContent
-        }
-      });
-      
-      this.logger.info(`Captions uploaded for video: ${videoId}`);
-    } catch (error) {
-      this.logger.error(`Failed to upload captions: ${error.message}`);
-    }
+    const captionsContent = await fs.readFile(captionsPath, 'utf8');
+    const requestBody = {
+      snippet: {
+        videoId,
+        language: 'en',
+        name: 'English Captions',
+        isDraft: false
+      }
+    };
+    await this.requireWriteActionConsent(
+      'captions.insert',
+      'youtube.captions.upload',
+      this.channelId + ':video:' + videoId + ':captions',
+      { requestBody, captionsPayloadHash: hashWritePayload(captionsContent) },
+      null
+    );
+    await this.youtube.captions.insert({
+      part: 'snippet',
+      requestBody,
+      media: { body: captionsContent }
+    });
+    this.logger.info(`Captions uploaded for video: ${videoId}`);
   }
 
   async processPublishQueue() {
