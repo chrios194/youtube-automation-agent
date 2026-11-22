@@ -1,9 +1,14 @@
 const { google } = require('googleapis');
 const { Logger } = require('../utils/logger');
 const { ChannelLearningEngine } = require('../utils/channel-learning-engine');
+const {
+  getYouTubeComplianceState,
+  assertYouTubeComplianceGate,
+  assertDerivedMetricsGate
+} = require('../utils/youtube-compliance-gate');
 
 class AnalyticsOptimizationAgent {
-  constructor(db, credentials) {
+  constructor(db, credentials, options = {}) {
     this.db = db;
     this.credentials = credentials;
     this.logger = new Logger('AnalyticsOptimization');
@@ -11,16 +16,35 @@ class AnalyticsOptimizationAgent {
     this.youtube = null;
     this.performanceData = new Map();
     this.learning = new ChannelLearningEngine(db);
+    this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    this.assertDerivedMetricsGate = options.assertDerivedMetricsGate || assertDerivedMetricsGate;
+    this.complianceBlocked = false;
   }
 
   async initialize() {
     this.logger.info('Initializing Analytics & Optimization Agent...');
+    const state = this.getYouTubeComplianceState();
+    if (!state.allowed) {
+      this.complianceBlocked = true;
+      this.logger.warn('Analytics remains disabled by the YouTube API Data deployment-compliance gate: ' + state.blockers.join('; '));
+      return true;
+    }
+    try {
+      this.assertDerivedMetricsGate('YouTube Analytics & Reporting derived metrics');
+    } catch (error) {
+      this.complianceBlocked = true;
+      this.logger.warn('Analytics-derived metrics remain disabled: ' + error.message);
+      return true;
+    }
     await this.setupAnalyticsAPI();
     await this.loadHistoricalData();
     return true;
   }
 
   async setupAnalyticsAPI() {
+    this.assertYouTubeComplianceGate('YouTube Analytics API initialization');
+    this.assertDerivedMetricsGate('YouTube Analytics & Reporting derived metrics');
     try {
       const auth = this.credentials.getYouTubeAuth();
       this.youtubeAnalytics = google.youtubeAnalytics({ version: 'v2', auth });
@@ -33,6 +57,8 @@ class AnalyticsOptimizationAgent {
   }
 
   async loadHistoricalData() {
+    this.assertYouTubeComplianceGate('YouTube API Data historical storage access');
+    this.assertDerivedMetricsGate('YouTube Analytics historical derived metrics');
     try {
       const history = await this.db.getAnalyticsHistory();
       history.forEach(record => {
@@ -54,6 +80,8 @@ class AnalyticsOptimizationAgent {
   }
 
   async analyzeVideoPerformance(videoId, options = {}) {
+    this.assertYouTubeComplianceGate('YouTube Analytics API Data access');
+    this.assertDerivedMetricsGate('YouTube Analytics & Reporting derived metrics');
     try {
       this.logger.info(`Analyzing performance for video: ${videoId}`);
       
@@ -134,6 +162,7 @@ class AnalyticsOptimizationAgent {
   }
 
   async getVideoDetails(videoId) {
+    this.assertYouTubeComplianceGate('YouTube video metadata and statistics access');
     const response = await this.youtube.videos.list({
       part: 'snippet,statistics,contentDetails',
       id: videoId
@@ -160,6 +189,8 @@ class AnalyticsOptimizationAgent {
   }
 
   async getVideoAnalytics(videoId, period = null, options = {}) {
+    this.assertYouTubeComplianceGate('YouTube Analytics API Data access');
+    this.assertDerivedMetricsGate('YouTube Analytics & Reporting derived metrics');
     const endDate = period?.endDate || new Date().toISOString().split('T')[0];
     const startDate = period?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     
@@ -522,6 +553,7 @@ class AnalyticsOptimizationAgent {
   }
 
   calculatePerformanceScore(analytics) {
+    this.assertDerivedMetricsGate('YouTube API Data-derived performance score');
     let score = 0;
     let maxScore = 0;
     
