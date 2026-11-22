@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const fs = require('fs').promises;
+const fsNative = require('fs');
+const fs = fsNative.promises;
 const path = require('path');
 const { assertIsolatedWorkspaceRuntime } = require('./workspace-runtime');
 
@@ -40,12 +41,36 @@ function decryptObject(envelope, masterKey) {
   return JSON.parse(plaintext.toString('utf8'));
 }
 
-async function atomicWriteJson(filePath, value, mode = 0o600) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, { mode });
-  await fs.rename(tempPath, filePath);
-  await fs.chmod(filePath, mode);
+async function atomicWriteJson(filePath, value, mode = 0o600, options = {}) {
+  const parentPath = path.dirname(filePath);
+  await fs.mkdir(parentPath, { recursive: true, mode: 0o700 });
+  const tempPath = `${filePath}.${process.pid}.${crypto.randomBytes(16).toString('hex')}.tmp`;
+  const flags = fsNative.constants.O_WRONLY |
+    fsNative.constants.O_CREAT |
+    fsNative.constants.O_EXCL |
+    (fsNative.constants.O_NOFOLLOW || 0);
+  let handle = null;
+  try {
+    handle = await fs.open(tempPath, flags, mode);
+    if (options.expectedParent) {
+      const actualParent = await fs.realpath(parentPath);
+      if (actualParent !== options.expectedParent) throw new Error('Workspace secret parent changed during atomic write');
+    }
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    if (options.expectedParent) {
+      const actualParent = await fs.realpath(parentPath);
+      if (actualParent !== options.expectedParent) throw new Error('Workspace secret parent changed before atomic rename');
+    }
+    await fs.rename(tempPath, filePath);
+    await fs.chmod(filePath, mode);
+  } catch (error) {
+    if (handle) await handle.close().catch(() => {});
+    await fs.unlink(tempPath).catch(() => {});
+    throw error;
+  }
 }
 
 async function readSecretFile(filePath, masterKey) {
@@ -87,6 +112,7 @@ async function resolveWorkspaceSecretPath(filePath, runtime, masterKey, { create
 
   if (createParent) {
     await fs.mkdir(configRoot, { recursive: true, mode: 0o700 });
+    await fs.chmod(configRoot, 0o700);
   }
   const realConfigRoot = await fs.realpath(configRoot);
   if (realConfigRoot !== configRoot || !realConfigRoot.startsWith(`${realAccountRoot}${path.sep}`)) {
@@ -96,6 +122,7 @@ async function resolveWorkspaceSecretPath(filePath, runtime, masterKey, { create
   const parentPath = path.dirname(target);
   if (createParent) {
     await fs.mkdir(parentPath, { recursive: true, mode: 0o700 });
+    await fs.chmod(parentPath, 0o700);
   }
   const realParent = await fs.realpath(parentPath);
   if (realParent !== parentPath || (realParent !== realConfigRoot && !realParent.startsWith(`${realConfigRoot}${path.sep}`))) {
@@ -114,21 +141,37 @@ async function resolveWorkspaceSecretPath(filePath, runtime, masterKey, { create
   if (targetStat && !targetStat.isFile()) {
     throw new Error('Workspace secret path must be a regular file');
   }
+  if (targetStat && (targetStat.mode & 0o077) !== 0) {
+    throw new Error('Workspace secret file permissions must be restricted to its account owner (0600)');
+  }
   return target;
 }
 
 async function readWorkspaceSecretFile(filePath, runtime, masterKey) {
   const target = await resolveWorkspaceSecretPath(filePath, runtime, masterKey);
-  const parsed = JSON.parse(await fs.readFile(target, 'utf8'));
-  if (parsed?.format !== FORMAT) {
-    throw new Error('Plaintext workspace secret files are rejected; an encrypted AgentTube secret envelope is required');
+  const flags = fsNative.constants.O_RDONLY | (fsNative.constants.O_NOFOLLOW || 0);
+  const handle = await fs.open(target, flags);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error('Workspace secret path must be a regular file');
+    if ((stat.mode & 0o077) !== 0) {
+      throw new Error('Workspace secret file permissions must be restricted to its account owner (0600)');
+    }
+    const parsed = JSON.parse(await handle.readFile('utf8'));
+    if (parsed?.format !== FORMAT) {
+      throw new Error('Plaintext workspace secret files are rejected; an encrypted AgentTube secret envelope is required');
+    }
+    return decryptObject(parsed, masterKey);
+  } finally {
+    await handle.close();
   }
-  return decryptObject(parsed, masterKey);
 }
 
 async function writeWorkspaceSecretFile(filePath, value, runtime, masterKey) {
   const target = await resolveWorkspaceSecretPath(filePath, runtime, masterKey, { createParent: true });
-  await atomicWriteJson(target, encryptObject(value, masterKey));
+  const expectedParent = await fs.realpath(path.dirname(target));
+  if (expectedParent !== path.dirname(target)) throw new Error('Workspace secret parent directory changed before write');
+  await atomicWriteJson(target, encryptObject(value, masterKey), 0o600, { expectedParent });
 }
 
 module.exports = {
