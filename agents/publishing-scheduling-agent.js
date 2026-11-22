@@ -594,6 +594,7 @@ class PublishingSchedulingAgent {
   }
 
   async getChannelAnalytics() {
+    this.assertYouTubeComplianceGate('YouTube channel statistics API Data access');
     try {
       // Get channel analytics for the last 30 days
       const response = await this.youtube.channels.list({
