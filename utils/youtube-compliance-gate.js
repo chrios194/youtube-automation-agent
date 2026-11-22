@@ -26,7 +26,34 @@ const REQUIRED_API_DATA_POLICY = Object.freeze({
   centralDashboardApiDataAggregationAllowed: false,
   centralDashboardApiDataVisibility: 'none',
   centralDashboardOperationalMetadataOnly: true,
+  centralLeaderboardApiDataAllowed: false,
+  centralLeaderboardSource: 'independently_generated_non_youtube_operational_metrics_only',
+  centralLeaderboardMustNotUseYouTubeApiData: true,
   derivedMetricsFromApiDataAllowedWithoutExplicitAuditPermission: false,
+  derivedMetricsFromApiDataEnabledByDefault: false,
+  derivedMetricsExceptionRequiresAdditionalPoliciesAmendmentAcceptance: true,
+  derivedMetricsExceptionRequiresAnalyticsReportingUseCase: true,
+  derivedMetricsExceptionRequiresComplianceAuditApproval: true,
+  derivedMetricsExceptionRequiresStandardQuotaExtensionApproval: true,
+  derivedMetricsExceptionRequiresSpecificMetricsAndStorageApproval: true,
+  derivedMetricsExceptionMaxStorageMonths: 36,
+  derivedMetricsMustBeDistinguishedFromRawApiData: true,
+  audiovisualContentDownloadWithoutPriorWrittenApprovalAllowed: false,
+  audiovisualContentImportWithoutPriorWrittenApprovalAllowed: false,
+  audiovisualContentBackupWithoutPriorWrittenApprovalAllowed: false,
+  audiovisualContentCacheWithoutPriorWrittenApprovalAllowed: false,
+  audiovisualContentStorageWithoutPriorWrittenApprovalAllowed: false,
+  audiovisualContentPriorWrittenApprovalRequired: true,
+  audiovisualAssetSourceProvenanceRequired: true,
+  audiovisualAssetsLimitedToOriginalUserSuppliedOrRightsHolderSources: true,
+  youtubePublicUrlIsPermissionToDownload: false,
+  youtubeWriteActionsRequirePriorSpecificExpressUserConsent: true,
+  writeActionConsentRequiredPerApiAction: true,
+  userControlsFinalSubmittedValues: true,
+  submittedValuesLockedAfterApproval: true,
+  renewedConsentRequiredAfterAnySubmittedValueChange: true,
+  automatedEngagementManipulationAllowed: false,
+  childDirectedApiClientWriteActionsAllowed: false,
   unofficialYouTubeScrapingAllowed: false,
   undocumentedYouTubeApplicationEndpointsAllowed: false,
   youtubeiJsInnertubeAllowed: false,
@@ -128,6 +155,78 @@ function getApiDataHandlingBlockers(apiDataHandling, now = new Date()) {
   return blockers;
 }
 
+function getDerivedMetricsGateState(apiDataHandling, options = {}) {
+  const derived = apiDataHandling?.derivedMetrics;
+  const blockers = [];
+  if (!derived || derived.enabled !== true) {
+    blockers.push('YouTube API Data-derived metrics are disabled by default; no approved exception is active');
+    return { allowed: false, blockers, derivedMetrics: derived || null };
+  }
+  const policy = apiDataHandling.policy || {};
+  if (apiDataHandling.status !== 'approved') blockers.push('derived metrics require approved API Data handling controls');
+  if (policy.apiDataCollectionAllowed !== true || policy.apiDataStorageAllowed !== true) {
+    blockers.push('derived metrics require approved API Data collection and storage');
+  }
+  if (derived.exceptionEnabled !== true) blockers.push('derived metrics exception is not explicitly enabled');
+  if (derived.additionalPoliciesAmendmentAccepted !== true ||
+      derived.additionalPoliciesAmendmentName !== 'Additional policies for derived metrics and data storage' ||
+      derived.additionalPoliciesAmendmentSection !== 'Section 5: Use Cases, API Integration, and Feature Implementation') {
+    blockers.push('derived metrics require acceptance of the current Additional policies for derived metrics and data storage amendment');
+  }
+  if (derived.useCase !== 'Analytics & Reporting') blockers.push('derived metrics exception must be limited to the Analytics & Reporting use case');
+  if (derived.auditStatus !== 'approved' || typeof derived.auditEvidenceRef !== 'string' || !derived.auditEvidenceRef.trim()) {
+    blockers.push('derived metrics require an approved analytics-use-case compliance audit and evidence');
+  }
+  if (derived.standardQuotaExtensionStatus !== 'approved' ||
+      typeof derived.standardQuotaExtensionEvidenceRef !== 'string' ||
+      !derived.standardQuotaExtensionEvidenceRef.trim()) {
+    blockers.push('derived metrics require an approved standard quota extension for the specific metrics and storage use');
+  }
+  if (!Array.isArray(derived.approvedMetricNames) ||
+      derived.approvedMetricNames.length === 0 ||
+      derived.approvedMetricNames.some(value => typeof value !== 'string' || !value.trim()) ||
+      new Set(derived.approvedMetricNames).size !== derived.approvedMetricNames.length) {
+    blockers.push('derived metrics require a specific, unique approved metric allowlist');
+  }
+  if (typeof derived.approvedStorageUseRef !== 'string' || !derived.approvedStorageUseRef.trim()) {
+    blockers.push('derived metrics require evidence for the specifically approved storage use');
+  }
+  if (!Number.isInteger(derived.maxStorageMonths) || derived.maxStorageMonths < 1 || derived.maxStorageMonths > 36) {
+    blockers.push('approved derived metrics and statistical data may be stored for no more than 36 calendar months');
+  }
+  if (derived.distinguishFromRawApiData !== true) blockers.push('derived metrics must be clearly distinguished from raw API Data');
+  if (derived.crossChannelAggregationAllowed !== false || derived.crossContentOwnerAggregationAllowed !== false) {
+    blockers.push('derived metrics cannot aggregate API Data across channels or content owners');
+  }
+  if (derived.centralLeaderboardApiDataAllowed !== false) {
+    blockers.push('central leaderboards must not use YouTube API Data, including approved derived metrics');
+  }
+  return { allowed: blockers.length === 0, blockers, derivedMetrics: derived };
+}
+
+function assertDerivedMetricsGate(action = 'YouTube API Data-derived metrics', options = {}) {
+  let config = options.config;
+  if (!config) {
+    try {
+      config = loadYouTubeComplianceConfig(options.configPath);
+    } catch (error) {
+      const wrapped = new Error(action + ' is blocked because compliance configuration is unavailable: ' + error.message);
+      wrapped.status = 409;
+      wrapped.code = 'YOUTUBE_DERIVED_METRICS_GATE_BLOCKED';
+      throw wrapped;
+    }
+  }
+  const state = getDerivedMetricsGateState(config.apiDataHandling, { now: options.now });
+  if (!state.allowed) {
+    const error = new Error(action + ' is blocked by the derived-metrics policy: ' + state.blockers.join('; '));
+    error.status = 409;
+    error.code = 'YOUTUBE_DERIVED_METRICS_GATE_BLOCKED';
+    error.blockers = state.blockers;
+    throw error;
+  }
+  return state;
+}
+
 function loadYouTubeComplianceConfig(filePath = DEFAULT_CONFIG_PATH) {
   const resolved = path.resolve(filePath);
   return JSON.parse(fs.readFileSync(resolved, 'utf8'));
@@ -189,6 +288,11 @@ function getYouTubeComplianceState(config, options = {}) {
     blockers.push('required compliance audit or reasoned not-required determination is not documented');
   }
   blockers.push(...getApiDataHandlingBlockers(current.apiDataHandling, now));
+  const derivedMetricsConfig = current.apiDataHandling?.derivedMetrics;
+  if (!derivedMetricsConfig || derivedMetricsConfig.enabled !== false) {
+    const derivedMetricsState = getDerivedMetricsGateState(current.apiDataHandling, { now });
+    blockers.push(...derivedMetricsState.blockers);
+  }
   const dataAccessReview = current.apiDataAccessReview || {};
   if (dataAccessReview.status !== 'approved') blockers.push('YouTube API data-access method review is not approved');
   for (const [field, expected] of Object.entries({
@@ -197,7 +301,14 @@ function getYouTubeComplianceState(config, options = {}) {
     youtubeiJsInnertubeUsed: false,
     captionsListReturnsMetadataOnly: true,
     captionsDownloadRequiresVideoEditPermission: true,
-    captionsDownloadIsGeneralPublicTranscriptSource: false
+    captionsDownloadIsGeneralPublicTranscriptSource: false,
+    youtubeAudiovisualContentDownloadedWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentImportedWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentBackedUpWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentCachedWithoutPriorWrittenApproval: false,
+    youtubeAudiovisualContentStoredWithoutPriorWrittenApproval: false,
+    assetSourceProvenanceRequired: true,
+    youtubePublicUrlIsPermissionToDownload: false
   })) {
     if (dataAccessReview[field] !== expected) blockers.push('YouTube API data-access method review is not compliant for ' + field);
   }
@@ -228,6 +339,12 @@ function getYouTubeComplianceState(config, options = {}) {
   if (controls.quotaShardingAllowed !== false) blockers.push('quota sharding or project multiplication is not explicitly prohibited');
   if (controls.perChannelProjectCreationAllowed !== false) blockers.push('per-channel API Project creation is not explicitly prohibited');
   if (controls.madeForKidsDeclarationRequiredPerVideo !== true) blockers.push('per-video Made for Kids declaration is not required');
+  if (controls.writeActionConsentRequiredPerApiAction !== true) blockers.push('every YouTube write action must require prior specific express user consent');
+  if (controls.automatedEngagementManipulationAllowed !== false) blockers.push('automated views, likes, comments, subscriptions, and engagement manipulation must remain prohibited');
+  if (controls.childDirectedApiClientWriteActionsAllowed !== false) blockers.push('Child-Directed API Clients must not perform YouTube write-based actions');
+  if (controls.finalSubmittedValuesUserControlled !== true) blockers.push('the user must retain final control over submitted YouTube values');
+  if (controls.renewedConsentRequiredAfterAnySubmittedValueChange !== true) blockers.push('any submitted-value change after approval requires renewed consent');
+  if (controls.audiovisualSourceProvenanceRequired !== true) blockers.push('source media provenance and license/permission evidence are required');
   if (typeof namespaces.pattern !== 'string' || !namespaces.pattern.includes('<accountId>') || namespaces.perAccountIsolated !== true || namespaces.crossAccountTokenReuseAllowed !== false || namespaces.apiProjectCountIndependent !== true) {
     blockers.push('per-account OAuth token isolation is not documented independently of API Project count');
   }
@@ -286,6 +403,8 @@ module.exports = {
   REQUIRED_API_DATA_VERIFICATION,
   REQUIRED_API_DATA_EVIDENCE,
   getApiDataHandlingBlockers,
+  getDerivedMetricsGateState,
+  assertDerivedMetricsGate,
   loadYouTubeComplianceConfig,
   getYouTubeComplianceState,
   assertYouTubeComplianceGate,
