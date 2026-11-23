@@ -142,7 +142,14 @@
       "submittedValuesLockedAfterApproval": true,
       "renewedConsentRequiredAfterAnySubmittedValueChange": true,
       "automatedEngagementManipulationAllowed": false,
-      "childDirectedApiClientWriteActionsAllowed": false
+      "childDirectedApiClientWriteActionsAllowed": false,
+      "audiovisualAssetAcquisitionMethodRequired": true,
+      "unofficialAudiovisualAcquisitionMethodsAllowed": false,
+      "rightsHolderLicenseEvidenceRequired": true,
+      "youtubePriorWrittenApprovalRequiredForYouTubeSource": true,
+      "writeActionConsentDurableRequired": true,
+      "writeActionConsentExactScopeRequired": true,
+      "writeActionConsentFinalValuesLocked": true
     },
     "verification": {
       "storageInventoryStatus": "not_verified",
@@ -209,7 +216,10 @@
     "childDirectedApiClientWriteActionsAllowed": false,
     "finalSubmittedValuesUserControlled": true,
     "renewedConsentRequiredAfterAnySubmittedValueChange": true,
-    "audiovisualSourceProvenanceRequired": true
+    "audiovisualSourceProvenanceRequired": true,
+    "writeActionConsentDurableRequired": true,
+    "writeActionConsentExactScopeRequired": true,
+    "writeActionConsentFinalValuesLocked": true
   },
   "apiDataAccessReview": {
     "status": "not_reviewed",
@@ -228,6 +238,10 @@
     "youtubeAudiovisualContentCachedWithoutPriorWrittenApproval": null,
     "youtubeAudiovisualContentStoredWithoutPriorWrittenApproval": null,
     "assetSourceProvenanceRequired": true,
-    "youtubePublicUrlIsPermissionToDownload": false
+    "youtubePublicUrlIsPermissionToDownload": false,
+    "acquisitionMethodRequired": true,
+    "unofficialAudiovisualAcquisitionMethodsAllowed": false,
+    "rightsHolderLicenseEvidenceRequired": true,
+    "youtubePriorWrittenApprovalRequiredForYouTubeSource": true
   }
 }
