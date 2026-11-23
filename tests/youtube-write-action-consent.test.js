@@ -44,6 +44,14 @@ function consentFor(expected) {
     consentId: 'consent-123',
     status: 'approved',
     consentScope: 'single_action',
+    singleUse: true,
+    persisted: true,
+    storageDurable: true,
+    storageChannelId: expected.channelId,
+    storageEvidenceRef: 'test:durable-channel-local-consent-store',
+    finalValuesLocked: true,
+    renewedConsentRequiredForChanges: true,
+    userControlsFinalValues: true,
     apiClientId: expected.apiClientId,
     channelId: expected.channelId,
     apiAction: expected.apiAction,
@@ -52,6 +60,7 @@ function consentFor(expected) {
     authorizingUserId: expected.authorizingUserId,
     approvedBy: expected.authorizingUserId,
     approvedAt: '2026-11-23T00:00:00.000Z',
+    expiresAt: '2026-11-25T00:00:00.000Z',
     approvedPayloadHash: hashWritePayload(expected.payload),
     approvedVisibility: expected.visibility,
     revokedAt: null,
@@ -60,8 +69,16 @@ function consentFor(expected) {
 }
 
 function mediaProvenance(sha256, overrides = {}) {
+  const sourceType = overrides.sourceType || 'original_created';
+  const methodByType = {
+    original_created: 'original_creation',
+    user_supplied: 'user_upload',
+    rights_holder_authorized: 'rights_holder_delivery',
+    youtube_audiovisual_content: 'youtube_approved_transfer'
+  };
   return {
-    sourceType: 'original_created',
+    sourceType,
+    acquisitionMethod: methodByType[sourceType],
     sourceRef: 'production:prod-001',
     creationRecordRef: 'generation-job:job-001',
     sha256,
@@ -129,7 +146,14 @@ test('revoked, consumed, future-dated, or non-single-action consent is rejected'
     consent => { consent.revokedAt = '2026-11-23T00:30:00.000Z'; },
     consent => { consent.consumedAt = '2026-11-23T00:30:00.000Z'; },
     consent => { consent.approvedAt = '2026-11-24T00:00:00.000Z'; },
-    consent => { consent.consentScope = 'all_future_actions'; }
+    consent => { consent.consentScope = 'all_future_actions'; },
+    consent => { consent.singleUse = false; },
+    consent => { consent.persisted = false; },
+    consent => { consent.storageDurable = false; },
+    consent => { consent.finalValuesLocked = false; },
+    consent => { consent.renewedConsentRequiredForChanges = false; },
+    consent => { consent.userControlsFinalValues = false; },
+    consent => { consent.expiresAt = '2026-11-23T00:00:00.000Z'; }
   ]) {
     const consent = consentFor(expected);
     mutate(consent);
@@ -152,15 +176,21 @@ test('write consent is atomically consumed once before a write can proceed', asy
   const expected = expectedWrite();
   const consent = consentFor(expected);
   let consumed = 0;
+  const getConsent = async () => consent;
+  getConsent.durable = true;
+  getConsent.channelId = expected.channelId;
+  const consumeConsent = async (id, context) => {
+    assert.equal(id, consent.consentId);
+    assert.equal(context.approvedPayloadHash, consent.approvedPayloadHash);
+    consumed++;
+    return true;
+  };
+  consumeConsent.atomic = true;
+  consumeConsent.channelId = expected.channelId;
   const result = await requireWriteActionConsent({
     ...expected,
-    getConsent: async () => consent,
-    consumeConsent: async (id, context) => {
-      assert.equal(id, consent.consentId);
-      assert.equal(context.approvedPayloadHash, consent.approvedPayloadHash);
-      consumed++;
-      return true;
-    },
+    getConsent,
+    consumeConsent,
     now: new Date('2026-11-23T01:00:00.000Z')
   });
   assert.equal(result.consumed, true);
@@ -169,11 +199,15 @@ test('write consent is atomically consumed once before a write can proceed', asy
 
 test('a consent provider that cannot atomically consume the record blocks the write', async () => {
   const expected = expectedWrite();
+  const getConsent = async () => consentFor(expected);
+  getConsent.durable = true;
+  getConsent.channelId = expected.channelId;
+  const consumeConsent = async () => false;
+  consumeConsent.atomic = true;
+  consumeConsent.channelId = expected.channelId;
   await assert.rejects(
     () => requireWriteActionConsent({
-      ...expected,
-      getConsent: async () => consentFor(expected),
-      consumeConsent: async () => false,
+      ...expected, getConsent, consumeConsent,
       now: new Date('2026-11-23T01:00:00.000Z')
     }),
     error => error.code === 'YOUTUBE_WRITE_ACTION_CONSENT_REPLAY_OR_REVOCATION'
@@ -262,16 +296,32 @@ test('YouTube audiovisual content requires prior written YouTube approval', () =
   const approved = mediaProvenance('a'.repeat(64), {
     sourceType: 'youtube_audiovisual_content',
     sourceRef: 'https://www.youtube.com/watch?v=example',
-    youtubePriorWrittenApprovalRef: 'approval:written-authorization'
+    youtubePriorWrittenApprovalRef: 'approval:written-authorization',
+    licenseOrPermissionRef: 'license:rights-holder-authorization'
   });
   assert.deepEqual(validateMediaSourceProvenance(approved), []);
 });
 
 test('user-supplied and rights-holder media require recorded permission or license provenance', () => {
-  const userSupplied = mediaProvenance('a'.repeat(64), { sourceType: 'user_supplied' });
+  const userSupplied = mediaProvenance('a'.repeat(64), {
+    sourceType: 'user_supplied', licenseOrPermissionRef: 'license:user-owned-file'
+  });
   assert.ok(validateMediaSourceProvenance(userSupplied).some(item => item.includes('user permission reference')));
-  const rightsHolder = mediaProvenance('a'.repeat(64), { sourceType: 'rights_holder_authorized' });
+  const rightsHolder = mediaProvenance('a'.repeat(64), {
+    sourceType: 'rights_holder_authorized', rightsHolderAuthorizationRef: 'authorization:holder'
+  });
   assert.ok(validateMediaSourceProvenance(rightsHolder).some(item => item.includes('license or permission reference')));
+  const validUserSupplied = mediaProvenance('a'.repeat(64), {
+    sourceType: 'user_supplied', userConsentRef: 'user-upload:123',
+    licenseOrPermissionRef: 'license:user-owned-file'
+  });
+  assert.deepEqual(validateMediaSourceProvenance(validUserSupplied), []);
+  const validRightsHolder = mediaProvenance('a'.repeat(64), {
+    sourceType: 'rights_holder_authorized',
+    rightsHolderAuthorizationRef: 'authorization:holder',
+    licenseOrPermissionRef: 'license:holder'
+  });
+  assert.deepEqual(validateMediaSourceProvenance(validRightsHolder), []);
 });
 
 test('source file hash must match the recorded media provenance', async t => {
@@ -286,4 +336,37 @@ test('source file hash must match the recorded media provenance', async t => {
   const changed = await verifyMediaSourceProvenance(mediaProvenance(sha256), filePath);
   assert.equal(changed.valid, false);
   assert.ok(changed.blockers.some(item => item.includes('SHA-256')));
+});
+
+
+test('acquisition method is explicit and must match the declared source type', () => {
+  const missing = mediaProvenance('a'.repeat(64), { acquisitionMethod: undefined });
+  assert.ok(validateMediaSourceProvenance(missing).some(item => item.includes('explicit authorized acquisition method')));
+  const mismatch = mediaProvenance('a'.repeat(64), { acquisitionMethod: 'user_upload' });
+  assert.ok(validateMediaSourceProvenance(mismatch).some(item => item.includes('does not match the declared audiovisual source type')));
+});
+
+test('unofficial acquisition methods are always rejected, even when a YouTube approval reference is present', () => {
+  for (const acquisitionMethod of [
+    'yt_dlp', 'browser_extraction', 'youtubei_js', 'innertube',
+    'undocumented_endpoint', 'unofficial_transcript_service', 'scraping',
+    'youtube_download', 'public_url_download'
+  ]) {
+    const provenance = mediaProvenance('a'.repeat(64), {
+      sourceType: 'youtube_audiovisual_content',
+      sourceRef: 'https://www.youtube.com/watch?v=example',
+      acquisitionMethod,
+      youtubePriorWrittenApprovalRef: 'approval:written-authorization',
+      licenseOrPermissionRef: 'license:rights-holder-authorization'
+    });
+    assert.ok(validateMediaSourceProvenance(provenance).some(item => item.includes('prohibited')));
+  }
+});
+
+test('upload stream is prepared before consent and atomic consent is immediately before videos.insert', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'agents', 'publishing-scheduling-agent.js'), 'utf8');
+  const start = source.indexOf('async uploadToYouTube(scheduleEntry)');
+  const end = source.indexOf('async isNarrationReady', start);
+  const method = source.slice(start, end);
+  assert.match(method, /const videoStream = await this\.getVideoStream\(metadata\.video\.path\);[\s\S]*?await this\.requireWriteActionConsent\([\s\S]*?\);[\s\S]*?scheduleEntry\.uploadAttempted = true;\s*const videoUpload = await this\.youtube\.videos\.insert/);
 });
