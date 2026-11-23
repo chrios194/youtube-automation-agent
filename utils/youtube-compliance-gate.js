@@ -49,6 +49,12 @@ const REQUIRED_API_DATA_POLICY = Object.freeze({
   youtubePublicUrlIsPermissionToDownload: false,
   youtubeWriteActionsRequirePriorSpecificExpressUserConsent: true,
   writeActionConsentRequiredPerApiAction: true,
+  writeActionConsentSingleUseRequired: true,
+  writeActionConsentAtomicConsumptionRequired: true,
+  writeActionConsentConsumedImmediatelyBeforeAdapterDispatch: true,
+  writeActionConsentReplayAllowed: false,
+  automatedCommentPostingAllowed: false,
+  automatedViewsLikesSubscriptionsAllowed: false,
   userControlsFinalSubmittedValues: true,
   submittedValuesLockedAfterApproval: true,
   renewedConsentRequiredAfterAnySubmittedValueChange: true,
@@ -340,7 +346,8 @@ function getYouTubeComplianceState(config, options = {}) {
   if (controls.perChannelProjectCreationAllowed !== false) blockers.push('per-channel API Project creation is not explicitly prohibited');
   if (controls.madeForKidsDeclarationRequiredPerVideo !== true) blockers.push('per-video Made for Kids declaration is not required');
   if (controls.writeActionConsentRequiredPerApiAction !== true) blockers.push('every YouTube write action must require prior specific express user consent');
-  if (controls.automatedEngagementManipulationAllowed !== false) blockers.push('automated views, likes, comments, subscriptions, and engagement manipulation must remain prohibited');
+  if (controls.writeActionConsentSingleUseRequired !== true || controls.writeActionConsentAtomicConsumptionRequired !== true || controls.writeActionConsentConsumedImmediatelyBeforeAdapterDispatch !== true || controls.writeActionConsentReplayAllowed !== false) blockers.push('write consent must be exact-scope, single-use, atomic, consumed immediately before dispatch, and non-replayable');
+  if (controls.automatedEngagementManipulationAllowed !== false || controls.automatedCommentPostingAllowed !== false || controls.automatedViewsLikesSubscriptionsAllowed !== false) blockers.push('automated views, likes, comments, subscriptions, and engagement manipulation must remain prohibited');
   if (controls.childDirectedApiClientWriteActionsAllowed !== false) blockers.push('Child-Directed API Clients must not perform YouTube write-based actions');
   if (controls.finalSubmittedValuesUserControlled !== true) blockers.push('the user must retain final control over submitted YouTube values');
   if (controls.renewedConsentRequiredAfterAnySubmittedValueChange !== true) blockers.push('any submitted-value change after approval requires renewed consent');
