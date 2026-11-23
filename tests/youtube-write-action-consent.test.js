@@ -12,6 +12,7 @@ const {
   validateWriteActionConsent,
   requireWriteActionConsent
 } = require('../utils/youtube-write-action-consent');
+const { PublishingSchedulingAgent } = require('../agents/publishing-scheduling-agent');
 const {
   isYouTubeUrl,
   validateMediaSourceProvenance,
@@ -196,6 +197,49 @@ test('automated comment writes are not an allowed YouTube write action', () => {
     }),
     error => error.code === 'YOUTUBE_WRITE_ACTION_CONSENT_INVALID'
   );
+});
+
+test('each packaging write consumes its exact consent immediately before that adapter dispatch', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'youtube-write-dispatch-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const thumbnailPath = path.join(directory, 'thumbnail.jpg');
+  fs.writeFileSync(thumbnailPath, Buffer.from('approved original thumbnail'));
+  const sha256 = await hashFile(thumbnailPath);
+  const events = [];
+  const agent = Object.create(PublishingSchedulingAgent.prototype);
+  agent.assertYouTubeComplianceGate = () => ({ allowed: true, blockers: [] });
+  agent.channelId = 'UC-channel-one';
+  agent.logger = { info: () => {} };
+  agent.requireWriteActionConsent = async apiAction => {
+    events.push('consent:' + apiAction);
+    return { consumed: true };
+  };
+  agent.youtube = {
+    videos: {
+      list: async () => {
+        events.push('read:videos.list');
+        return { data: { items: [{ snippet: { description: 'Existing description', tags: ['existing'], categoryId: '22' } }] } };
+      },
+      update: async () => { events.push('dispatch:videos.update'); }
+    },
+    thumbnails: {
+      set: async () => { events.push('dispatch:thumbnails.set'); }
+    }
+  };
+
+  await agent.applyVideoPackaging('video-1', {
+    title: 'Approved replacement title',
+    thumbnailPath,
+    thumbnailMediaProvenance: mediaProvenance(sha256)
+  });
+
+  assert.deepEqual(events, [
+    'read:videos.list',
+    'consent:videos.update',
+    'dispatch:videos.update',
+    'consent:thumbnails.set',
+    'dispatch:thumbnails.set'
+  ]);
 });
 
 test('public YouTube URLs are not permission to download audiovisual content', () => {
