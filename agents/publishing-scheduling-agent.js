@@ -468,15 +468,15 @@ class PublishingSchedulingAgent {
       { part: 'snippet', requestBody },
       null
     );
-    await this.requireWriteActionConsent(
-      'thumbnails.set',
-      'youtube.thumbnail.upload',
-      this.channelId + ':video:' + videoId + ':thumbnail',
-      { videoId, mediaSha256: mediaCheck.sha256 },
-      null
-    );
     await this.youtube.videos.update({ part: 'snippet', requestBody });
     try {
+      await this.requireWriteActionConsent(
+        'thumbnails.set',
+        'youtube.thumbnail.upload',
+        this.channelId + ':video:' + videoId + ':thumbnail',
+        { videoId, mediaSha256: mediaCheck.sha256 },
+        null
+      );
       await this.youtube.thumbnails.set({ videoId, media: { body: thumbnail } });
     } catch (error) {
       error.status = error.status || 502;
