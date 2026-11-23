@@ -44,6 +44,9 @@ function approvedConfig() {
   config.controls.projectProvisioningAllowed = true;
   config.controls.credentialProvisioningAllowed = true;
   config.controls.publishingAllowed = true;
+  config.controls.writeActionConsentDurableRequired = true;
+  config.controls.writeActionConsentExactScopeRequired = true;
+  config.controls.writeActionConsentFinalValuesLocked = true;
   config.oauthScopes = {
     ...config.oauthScopes,
     approved: [...config.oauthScopes.requested],
@@ -90,6 +93,10 @@ function approvedConfig() {
     youtubeAudiovisualContentCachedWithoutPriorWrittenApproval: false,
     youtubeAudiovisualContentStoredWithoutPriorWrittenApproval: false,
     assetSourceProvenanceRequired: true,
+    acquisitionMethodRequired: true,
+    unofficialAudiovisualAcquisitionMethodsAllowed: false,
+    rightsHolderLicenseEvidenceRequired: true,
+    youtubePriorWrittenApprovalRequiredForYouTubeSource: true,
     youtubePublicUrlIsPermissionToDownload: false,
     reviewedCommitSha: 'a'.repeat(40),
     evidenceRef: 'test:youtube-data-access-method-review',
@@ -433,4 +440,33 @@ test('per-action consent, user-controlled submitted values, and no automated eng
   assert.ok(state.blockers.some(item => item.includes('prior specific express user consent')));
   assert.ok(state.blockers.some(item => item.includes('final control')));
   assert.ok(state.blockers.some(item => item.includes('engagement manipulation')));
+});
+
+
+test('audiovisual acquisition method, rights-holder license, and prior YouTube approval requirements are mandatory', () => {
+  for (const field of [
+    'acquisitionMethodRequired',
+    'unofficialAudiovisualAcquisitionMethodsAllowed',
+    'rightsHolderLicenseEvidenceRequired',
+    'youtubePriorWrittenApprovalRequiredForYouTubeSource'
+  ]) {
+    const config = approvedConfig();
+    if (field === 'unofficialAudiovisualAcquisitionMethodsAllowed') config.apiDataAccessReview[field] = true;
+    else config.apiDataAccessReview[field] = false;
+    assert.ok(getYouTubeComplianceState(config).blockers.some(item => item.includes(field)));
+  }
+});
+
+test('durable exact-scope single-use consent controls are mandatory', () => {
+  for (const field of [
+    'writeActionConsentDurableRequired',
+    'writeActionConsentExactScopeRequired',
+    'writeActionConsentFinalValuesLocked'
+  ]) {
+    const config = approvedConfig();
+    config.controls[field] = false;
+    const state = getYouTubeComplianceState(config);
+    assert.equal(state.allowed, false);
+    assert.ok(state.blockers.some(item => item.includes('write consent must be durable')));
+  }
 });
