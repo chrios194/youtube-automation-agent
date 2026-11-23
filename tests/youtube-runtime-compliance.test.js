@@ -55,13 +55,25 @@ test('comment collection and sentiment analysis fail closed when API Data contro
   assert.equal(service.postingEnabled().enabled, false);
 });
 
-test('comment reply posting remains disabled without a one-use per-action consent provider', () => {
+test('automated comment posting remains prohibited even if a consent provider exists', async () => {
   const service = new AudienceEngagementService({}, { hasYouTubeScope: () => true }, null, {
     getYouTubeComplianceState: () => ({ allowed: true, blockers: [] }),
-    apiClientId: 'youtube-automation-agent'
+    apiClientId: 'youtube-automation-agent',
+    getWriteActionConsent: async () => ({ status: 'approved' }),
+    consumeWriteActionConsent: async () => true,
+    getAuthorizingUserId: async () => 'operator',
+    insertComment: async () => { throw new Error('must never be called'); }
   });
   assert.deepEqual(service.postingEnabled(), {
     enabled: false,
-    reason: 'per_action_user_consent_provider_unavailable'
+    reason: 'automated_comment_posting_prohibited'
   });
+  await assert.rejects(
+    () => service.approveReplyDraft('draft-1', { confirmed: true }),
+    error => error.status === 403 && error.code === 'AUTOMATED_ENGAGEMENT_POSTING_PROHIBITED'
+  );
+  await assert.rejects(
+    () => service.defaultInsertComment({ parentId: 'comment-1', text: 'reply' }),
+    error => error.status === 403 && error.code === 'AUTOMATED_ENGAGEMENT_POSTING_PROHIBITED'
+  );
 });
