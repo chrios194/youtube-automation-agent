@@ -6,8 +6,7 @@ const ACTION_CAPABILITIES = Object.freeze({
   'videos.insert': 'youtube.publish',
   'videos.update': 'youtube.schedule',
   'thumbnails.set': 'youtube.thumbnail.upload',
-  'captions.insert': 'youtube.captions.upload',
-  'comments.insert': 'youtube.comment.reply'
+  'captions.insert': 'youtube.captions.upload'
 });
 
 function stableValue(value) {
