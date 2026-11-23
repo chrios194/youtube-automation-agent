@@ -9,10 +9,34 @@ const ALLOWED_SOURCE_TYPES = new Set([
   'rights_holder_authorized',
   'youtube_audiovisual_content'
 ]);
+const ACQUISITION_METHOD_BY_SOURCE_TYPE = Object.freeze({
+  original_created: 'original_creation',
+  user_supplied: 'user_upload',
+  rights_holder_authorized: 'rights_holder_delivery',
+  youtube_audiovisual_content: 'youtube_approved_transfer'
+});
+const ALLOWED_ACQUISITION_METHODS = new Set(Object.values(ACQUISITION_METHOD_BY_SOURCE_TYPE));
+const FORBIDDEN_ACQUISITION_METHODS = new Set([
+  'yt_dlp',
+  'browser_extraction',
+  'youtubei_js',
+  'innertube',
+  'undocumented_endpoint',
+  'unofficial_transcript_service',
+  'scraping',
+  'youtube_download',
+  'public_url_download'
+]);
 
 function isYouTubeUrl(value) {
   if (typeof value !== 'string') return false;
-  return /(?:^|\.)youtube\.com(?:\/|$)|(?:^|\.)youtu\.be(?:\/|$)/i.test(value);
+  try {
+    const host = new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+    return host === 'youtube.com' || host.endsWith('.youtube.com') ||
+      host === 'youtu.be' || host.endsWith('.youtu.be');
+  } catch (_error) {
+    return false;
+  }
 }
 
 function validateMediaSourceProvenance(provenance) {
@@ -22,6 +46,13 @@ function validateMediaSourceProvenance(provenance) {
   }
   if (!ALLOWED_SOURCE_TYPES.has(provenance.sourceType)) {
     blockers.push('media source type must be original_created, user_supplied, rights_holder_authorized, or explicitly approved YouTube audiovisual content');
+  }
+  if (typeof provenance.acquisitionMethod !== 'string' ||
+      !ALLOWED_ACQUISITION_METHODS.has(provenance.acquisitionMethod) ||
+      FORBIDDEN_ACQUISITION_METHODS.has(provenance.acquisitionMethod)) {
+    blockers.push('an explicit authorized acquisition method is required; yt-dlp, browser extraction, youtubei.js/Innertube, undocumented endpoints, unofficial transcript services, and scraping are prohibited');
+  } else if (provenance.sourceType && ACQUISITION_METHOD_BY_SOURCE_TYPE[provenance.sourceType] !== provenance.acquisitionMethod) {
+    blockers.push('acquisition method does not match the declared audiovisual source type');
   }
   if (typeof provenance.sourceRef !== 'string' || !provenance.sourceRef.trim()) {
     blockers.push('media source reference is missing');
@@ -45,20 +76,36 @@ function validateMediaSourceProvenance(provenance) {
       (typeof provenance.creationRecordRef !== 'string' || !provenance.creationRecordRef.trim())) {
     blockers.push('originally created media requires a creation-record reference');
   }
-  if (provenance.sourceType === 'user_supplied' &&
-      (typeof provenance.userConsentRef !== 'string' || !provenance.userConsentRef.trim())) {
-    blockers.push('user-supplied media requires a recorded user permission reference');
+  if (provenance.sourceType === 'user_supplied') {
+    if (typeof provenance.userConsentRef !== 'string' || !provenance.userConsentRef.trim()) {
+      blockers.push('user-supplied media requires a recorded user permission reference');
+    }
+    if (typeof provenance.licenseOrPermissionRef !== 'string' || !provenance.licenseOrPermissionRef.trim()) {
+      blockers.push('user-supplied media requires ownership or license provenance');
+    }
   }
-  if (provenance.sourceType === 'rights_holder_authorized' &&
-      (typeof provenance.licenseOrPermissionRef !== 'string' || !provenance.licenseOrPermissionRef.trim())) {
-    blockers.push('rights-holder media requires a license or permission reference');
+  if (provenance.sourceType === 'rights_holder_authorized') {
+    if (typeof provenance.licenseOrPermissionRef !== 'string' || !provenance.licenseOrPermissionRef.trim()) {
+      blockers.push('rights-holder media requires a license or permission reference');
+    }
+    if (typeof provenance.rightsHolderAuthorizationRef !== 'string' || !provenance.rightsHolderAuthorizationRef.trim()) {
+      blockers.push('rights-holder media requires a rights-holder authorization reference');
+    }
   }
-  if (provenance.sourceType === 'youtube_audiovisual_content' &&
-      (typeof provenance.youtubePriorWrittenApprovalRef !== 'string' || !provenance.youtubePriorWrittenApprovalRef.trim())) {
-    blockers.push('YouTube audiovisual content requires prior written YouTube approval');
+  if (provenance.sourceType === 'youtube_audiovisual_content') {
+    if (provenance.acquisitionMethod !== 'youtube_approved_transfer') {
+      blockers.push('YouTube audiovisual content may only use an explicitly approved transfer method');
+    }
+    if (typeof provenance.youtubePriorWrittenApprovalRef !== 'string' || !provenance.youtubePriorWrittenApprovalRef.trim()) {
+      blockers.push('YouTube audiovisual content requires prior written YouTube approval');
+    }
+    if (typeof provenance.licenseOrPermissionRef !== 'string' || !provenance.licenseOrPermissionRef.trim()) {
+      blockers.push('YouTube audiovisual content also requires source-owner license or permission provenance');
+    }
   }
   if (isYouTubeUrl(provenance.sourceRef) &&
       (provenance.sourceType !== 'youtube_audiovisual_content' ||
+       provenance.acquisitionMethod !== 'youtube_approved_transfer' ||
        typeof provenance.youtubePriorWrittenApprovalRef !== 'string' ||
        !provenance.youtubePriorWrittenApprovalRef.trim())) {
     blockers.push('a public YouTube URL alone cannot establish rights or authorize media retrieval');
@@ -101,6 +148,8 @@ async function verifyMediaSourceProvenance(provenance, filePath) {
 
 module.exports = {
   ALLOWED_SOURCE_TYPES,
+  ALLOWED_ACQUISITION_METHODS,
+  FORBIDDEN_ACQUISITION_METHODS,
   isYouTubeUrl,
   validateMediaSourceProvenance,
   hashFile,
