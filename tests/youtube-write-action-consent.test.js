@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
+  ACTION_CAPABILITIES,
   hashWritePayload,
   validateWriteActionConsent,
   requireWriteActionConsent
@@ -175,6 +176,25 @@ test('a consent provider that cannot atomically consume the record blocks the wr
       now: new Date('2026-11-23T01:00:00.000Z')
     }),
     error => error.code === 'YOUTUBE_WRITE_ACTION_CONSENT_REPLAY_OR_REVOCATION'
+  );
+});
+
+
+test('automated comment writes are not an allowed YouTube write action', () => {
+  assert.equal(ACTION_CAPABILITIES['comments.insert'], undefined);
+  const expected = {
+    ...expectedWrite(),
+    apiAction: 'comments.insert',
+    capability: 'youtube.comment.reply',
+    resourceScope: 'UC-channel-one:comment:comment-1',
+    payload: { parentId: 'comment-1', text: 'Reply text' },
+    visibility: null
+  };
+  assert.throws(
+    () => validateWriteActionConsent(consentFor(expected), expected, {
+      now: new Date('2026-11-23T01:00:00.000Z')
+    }),
+    error => error.code === 'YOUTUBE_WRITE_ACTION_CONSENT_INVALID'
   );
 });
 
