@@ -1,9 +1,6 @@
 const crypto = require('crypto');
 const { Logger } = require('./logger');
 const { getYouTubeComplianceState, assertYouTubeComplianceGate, assertDerivedMetricsGate } = require('./youtube-compliance-gate');
-const { requireWriteActionConsent } = require('./youtube-write-action-consent');
-
-const FORCE_SSL_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
 const COMMENT_FLAGS = ['question', 'request', 'praise', 'correction', 'spam', 'scam', 'toxic'];
 const QUARANTINE_FLAGS = ['spam', 'scam', 'toxic'];
 const THEME_KINDS = ['question', 'request', 'feedback', 'correction', 'praise'];
@@ -20,16 +17,11 @@ class AudienceEngagementService {
     this.dailyReplyCap = Number(options.dailyReplyCap || process.env.ENGAGEMENT_DAILY_REPLY_CAP || 50);
     this.syncDelayMs = Number(options.syncDelayMs ?? 2000);
     this.listCommentThreads = options.listCommentThreads || (params => this.defaultListCommentThreads(params));
-    this.insertComment = options.insertComment || (params => this.defaultInsertComment(params));
+    this.insertComment = () => this.defaultInsertComment();
     this.getChannelId = options.getChannelId || (() => this.defaultGetChannelId());
     this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
     this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
     this.assertDerivedMetricsGate = options.assertDerivedMetricsGate || assertDerivedMetricsGate;
-    this.getWriteActionConsent = options.getWriteActionConsent || null;
-    this.consumeWriteActionConsent = options.consumeWriteActionConsent || null;
-    this.getAuthorizingUserId = options.getAuthorizingUserId || null;
-    const initialCompliance = this.getYouTubeComplianceState();
-    this.apiClientId = options.apiClientId || initialCompliance.config?.apiClient?.id || null;
     this.channelId = null;
   }
 
@@ -46,14 +38,11 @@ class AudienceEngagementService {
     return response.data;
   }
 
-  async defaultInsertComment({ parentId, text }) {
-    this.assertYouTubeComplianceGate('YouTube comment reply write');
-    const youtube = this.credentials.getYouTubeClient();
-    const response = await youtube.comments.insert({
-      part: ['snippet'],
-      requestBody: { snippet: { parentId, textOriginal: text } }
-    });
-    return { id: response.data?.id };
+  async defaultInsertComment() {
+    const error = new Error('Automated YouTube comment posting is prohibited by policy');
+    error.status = 403;
+    error.code = 'AUTOMATED_ENGAGEMENT_POSTING_PROHIBITED';
+    throw error;
   }
 
   async defaultGetChannelId() {
@@ -476,14 +465,7 @@ Comments: ${JSON.stringify(payload)}`;
   }
 
   postingEnabled() {
-    if (!this.credentials?.hasYouTubeScope) return { enabled: false, reason: 'credentials_unavailable' };
-    if (!this.credentials.hasYouTubeScope(FORCE_SSL_SCOPE)) return { enabled: false, reason: 'missing_scope' };
-    const compliance = this.getYouTubeComplianceState();
-    if (!compliance.allowed) return { enabled: false, reason: 'youtube_compliance_gate_blocked' };
-    if (typeof this.getWriteActionConsent !== 'function' || typeof this.consumeWriteActionConsent !== 'function' || typeof this.getAuthorizingUserId !== 'function' || !this.apiClientId) {
-      return { enabled: false, reason: 'per_action_user_consent_provider_unavailable' };
-    }
-    return { enabled: true, reason: null };
+    return { enabled: false, reason: 'automated_comment_posting_prohibited' };
   }
 
   async requireDraft(draftId) {
@@ -520,84 +502,11 @@ Comments: ${JSON.stringify(payload)}`;
     throw error;
   }
 
-  async approveReplyDraft(draftId, input = {}) {
-    if (input.confirmed !== true) {
-      const error = new Error('Confirm the reply text before posting to YouTube');
-      error.status = 409;
-      error.code = 'REPLY_APPROVAL_REQUIRED';
-      throw error;
-    }
-    let draft = await this.requireDraft(draftId);
-    if (draft.status === 'posted') {
-      const error = new Error('This reply was already posted');
-      error.status = 409;
-      throw error;
-    }
-    if (draft.status === 'discarded') {
-      const error = new Error('Edit the discarded draft to restore it before approval');
-      error.status = 409;
-      throw error;
-    }
-    const posting = this.postingEnabled();
-    if (!posting.enabled) {
-      const error = new Error(
-        posting.reason === 'missing_scope'
-          ? 'Posting requires the YouTube comment permission.'
-          : posting.reason === 'youtube_compliance_gate_blocked'
-            ? 'Posting is blocked until deployed YouTube API Data controls are verified.'
-            : 'Posting is blocked until a persistent, one-use, exact-text user-consent provider is configured.'
-      );
-      error.status = 409;
-      error.code = posting.reason === 'missing_scope'
-        ? 'REPLY_SCOPE_REQUIRED'
-        : posting.reason === 'youtube_compliance_gate_blocked'
-          ? 'YOUTUBE_COMPLIANCE_GATE_BLOCKED'
-          : 'YOUTUBE_WRITE_ACTION_CONSENT_REQUIRED';
-      throw error;
-    }
-    const since = new Date(Date.now() - 86400000).toISOString();
-    if (await this.db.countReplyDraftsPostedSince(since) >= this.dailyReplyCap) {
-      const error = new Error(`The daily reply cap (${this.dailyReplyCap}) was reached; try again tomorrow or raise ENGAGEMENT_DAILY_REPLY_CAP`);
-      error.status = 429;
-      throw error;
-    }
-    if (typeof input.editedText === 'string' && input.editedText.trim()) {
-      draft = await this.db.updateReplyDraft(draftId, { editedText: input.editedText.trim().slice(0, 1000) });
-    }
-    const text = (draft.editedText || draft.draftText || '').trim();
-    const channelId = await this.resolveChannelId();
-    const authorizingUserId = await this.getAuthorizingUserId();
-    await requireWriteActionConsent({
-      getConsent: this.getWriteActionConsent,
-      consumeConsent: this.consumeWriteActionConsent,
-      apiClientId: this.apiClientId,
-      channelId,
-      apiAction: 'comments.insert',
-      capability: 'youtube.comment.reply',
-      resourceScope: channelId + ':comment:' + draft.commentId,
-      authorizingUserId,
-      payload: { parentId: draft.commentId, text },
-      visibility: null
-    });
-    try {
-      const posted = await this.insertComment({ parentId: draft.commentId, text });
-      if (!posted?.id) throw new Error('YouTube did not return a comment id for the posted reply');
-      await this.db.markAudienceCommentReplied(draft.commentId);
-      return await this.db.updateReplyDraft(draftId, {
-        status: 'posted',
-        postedCommentId: posted.id,
-        postedAt: new Date().toISOString(),
-        failureReason: null
-      });
-    } catch (error) {
-      await this.db.updateReplyDraft(draftId, {
-        status: 'failed',
-        failureReason: String(error.message || 'Posting failed').slice(0, 300)
-      });
-      const wrapped = new Error(`The reply could not be posted: ${error.message}`);
-      wrapped.status = 502;
-      throw wrapped;
-    }
+  async approveReplyDraft(_draftId, _input = {}) {
+    const error = new Error('Automated YouTube comment posting is prohibited by policy; reply drafts may be reviewed or discarded but cannot be posted by this application.');
+    error.status = 403;
+    error.code = 'AUTOMATED_ENGAGEMENT_POSTING_PROHIBITED';
+    throw error;
   }
 
   async getSummary() {
@@ -621,7 +530,7 @@ Comments: ${JSON.stringify(payload)}`;
       recentThemes: insights
         .flatMap(insight => (insight.themes || []).slice(0, 3).map(theme => ({ ...theme, videoId: insight.videoId, videoTitle: insight.title })))
         .slice(0, 8),
-      evidencePolicy: 'Comments are fetched read-only from YouTube. Replies post only after operator approval, and fallback analysis never proposes drafts or ideas.'
+      evidencePolicy: 'Automated YouTube comment posting is prohibited. Reply drafts may be reviewed or discarded; no comment write is performed by this application.'
     };
   }
 }
