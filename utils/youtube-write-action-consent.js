@@ -57,6 +57,16 @@ function validateWriteActionConsent(consent, expected, options = {}) {
   if (consent.status !== 'approved' || consent.consentScope !== 'single_action') {
     fail('YOUTUBE_WRITE_ACTION_CONSENT_INVALID', 'Consent must be approved and limited to one specific action');
   }
+  if (consent.singleUse !== true || consent.persisted !== true || consent.storageDurable !== true ||
+      consent.storageChannelId !== expected.channelId ||
+      typeof consent.storageEvidenceRef !== 'string' || !consent.storageEvidenceRef.trim()) {
+    fail('YOUTUBE_WRITE_ACTION_CONSENT_NOT_DURABLE_SINGLE_USE', 'Consent must be a persisted, durable, channel-local, single-use record with storage evidence');
+  }
+  if (consent.finalValuesLocked !== true ||
+      consent.renewedConsentRequiredForChanges !== true ||
+      consent.userControlsFinalValues !== true) {
+    fail('YOUTUBE_WRITE_ACTION_CONSENT_FINAL_VALUES_NOT_LOCKED', 'The user must control and lock every submitted value; any change requires renewed consent');
+  }
   if (consent.apiClientId !== expected.apiClientId ||
       consent.channelId !== expected.channelId ||
       consent.apiAction !== expected.apiAction ||
@@ -71,12 +81,12 @@ function validateWriteActionConsent(consent, expected, options = {}) {
   if (typeof consent.consentId !== 'string' || !consent.consentId.trim()) {
     fail('YOUTUBE_WRITE_ACTION_CONSENT_ID_MISSING', 'A durable consent record ID is required');
   }
-  if (!isTimezoneQualified(consent.approvedAt)) {
-    fail('YOUTUBE_WRITE_ACTION_CONSENT_TIMESTAMP_INVALID', 'Consent approval requires a timezone-qualified timestamp');
+  if (!isTimezoneQualified(consent.approvedAt) || !isTimezoneQualified(consent.expiresAt)) {
+    fail('YOUTUBE_WRITE_ACTION_CONSENT_TIMESTAMP_INVALID', 'Consent approval and expiry require timezone-qualified timestamps');
   }
   const now = options.now instanceof Date ? options.now.getTime() : Date.parse(options.now || new Date().toISOString());
-  if (!Number.isFinite(now) || Date.parse(consent.approvedAt) > now + 60_000) {
-    fail('YOUTUBE_WRITE_ACTION_CONSENT_TIMESTAMP_INVALID', 'Consent approval timestamp is invalid or in the future');
+  if (!Number.isFinite(now) || Date.parse(consent.approvedAt) > now + 60_000 || Date.parse(consent.expiresAt) <= now) {
+    fail('YOUTUBE_WRITE_ACTION_CONSENT_TIMESTAMP_INVALID', 'Consent approval or expiry timestamp is invalid');
   }
   if (consent.revokedAt != null || consent.consumedAt != null) {
     fail('YOUTUBE_WRITE_ACTION_CONSENT_REVOKED_OR_CONSUMED', 'Revoked or previously consumed consent cannot authorize another write');
@@ -113,6 +123,13 @@ async function requireWriteActionConsent(input = {}) {
     fail(
       'YOUTUBE_WRITE_ACTION_CONSENT_PROVIDER_UNAVAILABLE',
       'No trusted, persistent, one-use user-consent provider is configured; YouTube write actions remain disabled'
+    );
+  }
+  if (getConsent.durable !== true || getConsent.channelId !== expected.channelId ||
+      consumeConsent.atomic !== true || consumeConsent.channelId !== expected.channelId) {
+    fail(
+      'YOUTUBE_WRITE_ACTION_CONSENT_PROVIDER_NOT_DURABLE_CHANNEL_LOCAL_ATOMIC',
+      'Consent lookup must use durable channel-local storage and consumption must be atomic for the same channel'
     );
   }
   const consent = await getConsent({
