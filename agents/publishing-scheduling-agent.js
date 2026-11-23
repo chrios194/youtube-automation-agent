@@ -281,16 +281,21 @@ class PublishingSchedulingAgent {
       error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
       throw error;
     }
-    await this.requireWriteActionConsent(
-      'videos.insert',
-      'youtube.publish',
-      this.channelId + ':new-video',
-      { videoMetadata, mediaSha256: mediaCheck.sha256 },
-      videoMetadata.status.privacyStatus
-    );
-
-    // Resolve the file only after the exact submitted values and media bytes have consent.
+    // Prepare and validate the original local source stream before consuming the one-use consent.
     const videoStream = await this.getVideoStream(metadata.video.path);
+    try {
+      await this.requireWriteActionConsent(
+        'videos.insert',
+        'youtube.publish',
+        this.channelId + ':new-video',
+        { videoMetadata, mediaSha256: mediaCheck.sha256 },
+        videoMetadata.status.privacyStatus
+      );
+    } catch (error) {
+      if (typeof videoStream.destroy === 'function') videoStream.destroy();
+      throw error;
+    }
+    // The atomic single-use consent was consumed immediately above; dispatch is the next operation.
     scheduleEntry.uploadAttempted = true;
     const videoUpload = await this.youtube.videos.insert({
       part: 'snippet,status',
