@@ -5,11 +5,11 @@ const path = require('path');
 const chalk = require('chalk');
 const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
 const { YOUTUBE_OAUTH_SCOPES } = require('./utils/youtube-oauth-scopes');
-const { assertIsolatedWorkspaceRuntime } = require('./utils/workspace-runtime');
+const { assertChannelBoundWorkspaceRuntime } = require('./utils/workspace-runtime');
 
 class OAuthServer {
   constructor() {
-    this.runtime = assertIsolatedWorkspaceRuntime();
+    this.runtime = assertChannelBoundWorkspaceRuntime();
     this.credentialsPath = path.join(this.runtime.configDir, 'credentials.json');
     this.tokensPath = path.join(this.runtime.configDir, 'tokens.json');
     this.app = express();
