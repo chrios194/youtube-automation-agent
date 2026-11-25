@@ -9,7 +9,8 @@
       "enabled": true,
       "port": 3461,
       "envFile": "runtime/creator-pod-alpha/creator-ai-ops/account.env",
-      "runtimeDir": "runtime/creator-pod-alpha/creator-ai-ops"
+      "runtimeDir": "runtime/creator-pod-alpha/creator-ai-ops",
+      "youtubeChannelId": "REPLACE_WITH_REAL_UC_CHANNEL_ID"
     },
     {
       "id": "creator-quantum",
@@ -17,7 +18,8 @@
       "enabled": true,
       "port": 3462,
       "envFile": "runtime/creator-pod-alpha/creator-quantum/account.env",
-      "runtimeDir": "runtime/creator-pod-alpha/creator-quantum"
+      "runtimeDir": "runtime/creator-pod-alpha/creator-quantum",
+      "youtubeChannelId": "REPLACE_WITH_REAL_UC_CHANNEL_ID"
     },
     {
       "id": "creator-small-biz",
@@ -25,7 +27,8 @@
       "enabled": false,
       "port": 3463,
       "envFile": "runtime/creator-pod-alpha/creator-small-biz/account.env",
-      "runtimeDir": "runtime/creator-pod-alpha/creator-small-biz"
+      "runtimeDir": "runtime/creator-pod-alpha/creator-small-biz",
+      "youtubeChannelId": "REPLACE_WITH_REAL_UC_CHANNEL_ID"
     }
   ]
 }
