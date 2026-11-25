@@ -2,25 +2,29 @@
   "schemaVersion": 1,
   "apiClient": {
     "id": "agenttube-youtube-automation-agent",
-    "productName": "AgentTube Creator Automation",
+    "productName": "AgentTube Creator Automation — Node.js/Express publisher application",
     "productVersion": "3.0.0",
     "repository": "chrios194/youtube-automation-agent",
     "boundaryStatus": "identified_pending_assessment",
     "needsCredentials": true,
     "usesYouTubeDataApiV3": true,
     "usesUserAuthorization": true,
-    "oauthClientId": null
+    "oauthClientId": null,
+    "applicationBoundary": "Independent Node.js/Express publisher and creator-operations application in chrios194/youtube-automation-agent; distinct from the Next.js/Convex AgentTube video-analysis application in chrios194/AgentTube.",
+    "channelProcessesShareApiClient": true,
+    "projectPerChannel": false
   },
   "boundaryReview": {
     "status": "identified_pending_deployment_and_child_audience_review",
-    "reviewedAt": "2026-11-23",
+    "reviewedAt": "2026-11-26",
     "evidenceRefs": [
-      "README.md: AgentTube creator-business operating system and operator workflow",
-      "docs/multi-account-workspaces.md: one AgentTube product launches isolated account processes",
+      "README.md: AgentTube open-source YouTube channel automation product and operator workflow",
+      "package.json: Node.js application and googleapis dependency",
       "index.js: Express application initializes PublishingSchedulingAgent",
-      "agents/publishing-scheduling-agent.js: google.youtube(v3) and videos.insert",
-      "docs/YOUTUBE-API-DATA-HANDLING-2026-11-21.md",
-      "Core: docs/YOUTUBE-API-CLIENT-BOUNDARY-REVIEW-2026-11-21.md"
+      "agents/publishing-scheduling-agent.js: YouTube Data API v3 publishing, read and write methods",
+      "workspace.js: one bounded application launches isolated account processes",
+      "docs/multi-account-workspaces.md: channel-bound account/token namespace; one product API Client, not one per channel",
+      "Core: docs/YOUTUBE-API-CLIENT-BOUNDARY-REVIEW-2026-11-26.md"
     ]
   },
   "childDirectedAssessment": {
@@ -69,10 +73,14 @@
     "evidenceRef": null
   },
   "tokenNamespaces": {
-    "pattern": "runtime/<workspaceId>/<accountId>/config/tokens.json",
+    "pattern": "runtime/<workspaceId>/<accountId>/config/tokens.json; each account must map to exactly one unique YOUTUBE_CHANNEL_ID",
     "perAccountIsolated": true,
     "crossAccountTokenReuseAllowed": false,
-    "apiProjectCountIndependent": true
+    "apiProjectCountIndependent": true,
+    "channelIdBindingRequired": true,
+    "channelIdUniquePerWorkspace": true,
+    "accountMapsToExactlyOneChannel": true,
+    "apiProjectPerChannel": false
   },
   "apiDataHandling": {
     "status": "not_approved",
