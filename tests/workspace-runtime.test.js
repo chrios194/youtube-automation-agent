@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 
-const { assertWorkspaceAccountId, assertIsolatedWorkspaceRuntime, getWorkspaceRuntime } = require('../utils/workspace-runtime');
+const { assertWorkspaceAccountId, assertIsolatedWorkspaceRuntime, assertChannelBoundWorkspaceRuntime, getWorkspaceRuntime } = require('../utils/workspace-runtime');
 const { CredentialManager } = require('../utils/credential-manager');
 const { readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('../utils/secret-store');
 const { ModernAuth } = require('../modern-auth');
@@ -24,13 +24,17 @@ function resetEnvironment() {
   delete process.env.WORKSPACE_DATA_DIR;
   delete process.env.WORKSPACE_CONFIG_DIR;
   delete process.env.WORKSPACE_STRICT_MODE;
+  delete process.env.YOUTUBE_CHANNEL_ID;
+  delete process.env.AIOS_YOUTUBE_CHANNEL_ID;
 }
 
 test.afterEach(() => resetEnvironment());
 
-function createTwoAccountFixture({ duplicateApiKey = false, duplicateMasterKey = false } = {}) {
+function createTwoAccountFixture({ duplicateApiKey = false, duplicateMasterKey = false, duplicateChannelId = false } = {}) {
   const fixtureDir = fs.mkdtempSync(path.join(__dirname, 'fixtures', 'workspace', 'isolation-'));
   const relativeDir = path.relative(path.join(__dirname, '..'), fixtureDir).split(path.sep).join('/');
+  const channelA = 'UC' + 'a'.repeat(22);
+  const channelB = duplicateChannelId ? channelA : 'UC' + 'b'.repeat(22);
   const keys = {
     apiA: 'account-a-api-key-12345678901234567890',
     apiB: duplicateApiKey ? 'account-a-api-key-12345678901234567890' : 'account-b-api-key-12345678901234567890',
@@ -52,8 +56,8 @@ function createTwoAccountFixture({ duplicateApiKey = false, duplicateMasterKey =
     version: 1,
     workspaceId: 'fixture-isolation',
     accounts: [
-      { id: 'account-a', port: 4201, envFile: `${relativeDir}/account-a.env` },
-      { id: 'account-b', port: 4202, envFile: `${relativeDir}/account-b.env` }
+      { id: 'account-a', youtubeChannelId: channelA, port: 4201, envFile: `${relativeDir}/account-a.env` },
+      { id: 'account-b', youtubeChannelId: channelB, port: 4202, envFile: `${relativeDir}/account-b.env` }
     ]
   }, null, 2));
   return { fixtureDir, manifestPath };
@@ -79,12 +83,15 @@ test('creates isolated account runtime paths in workspace mode', () => {
   process.env.WORKSPACE_RUNTIME_DIR = path.dirname(accountRoot);
   process.env.WORKSPACE_ACCOUNT_ROOT_DIR = accountRoot;
   process.env.WORKSPACE_STRICT_MODE = 'true';
+  process.env.YOUTUBE_CHANNEL_ID = 'UC' + 'a'.repeat(22);
 
   const runtime = getWorkspaceRuntime();
   assert.equal(runtime.enabled, true);
   assert.equal(runtime.accountId, 'creator-ai-ops');
   assert.equal(runtime.accountName, 'AI Operations Creator');
   assert.equal(runtime.strictMode, true);
+  assert.equal(runtime.channelId, 'UC' + 'a'.repeat(22));
+  assert.equal(assertChannelBoundWorkspaceRuntime().channelId, runtime.channelId);
   assert.match(runtime.dataDir, /creator-ai-ops[\\/]data$/);
   assert.match(runtime.configDir, /creator-ai-ops[\\/]config$/);
 });
@@ -131,6 +138,10 @@ test('workspace child environments inherit only safe OS variables and each accou
     assert.notEqual(accountA.AGENTTUBE_MASTER_KEY, accountB.AGENTTUBE_MASTER_KEY);
     assert.equal(accountA.WORKSPACE_ACCOUNT_ID, 'account-a');
     assert.equal(accountB.WORKSPACE_ACCOUNT_ID, 'account-b');
+    assert.equal(accountA.YOUTUBE_CHANNEL_ID, 'UC' + 'a'.repeat(22));
+    assert.equal(accountB.YOUTUBE_CHANNEL_ID, 'UC' + 'b'.repeat(22));
+    assert.equal(accountA.AIOS_YOUTUBE_CHANNEL_ID, accountA.YOUTUBE_CHANNEL_ID);
+    assert.equal(accountB.AIOS_YOUTUBE_CHANNEL_ID, accountB.YOUTUBE_CHANNEL_ID);
     assert.ok(accountA.PATH);
   } finally {
     if (previousOpenAI === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousOpenAI;
@@ -414,4 +425,43 @@ test('strict workspace stores encrypted YouTube tokens only under the account co
   } finally {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
+});
+
+test('workspace rejects duplicate YouTube channel IDs across accounts', async () => {
+  const fixture = createTwoAccountFixture({ duplicateChannelId: true });
+  try {
+    await assert.rejects(() => validateManifest(fixture.manifestPath), /Duplicate YouTube channel ID/);
+  } finally {
+    fs.rmSync(fixture.fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('workspace rejects missing or malformed YouTube channel IDs', async () => {
+  const fixture = createTwoAccountFixture();
+  try {
+    const manifest = JSON.parse(fs.readFileSync(fixture.manifestPath, 'utf8'));
+    manifest.accounts[0].youtubeChannelId = 'not-a-channel-id';
+    fs.writeFileSync(fixture.manifestPath, JSON.stringify(manifest, null, 2));
+    await assert.rejects(
+      () => validateManifest(fixture.manifestPath),
+      /requires an exact YouTube channel ID/
+    );
+  } finally {
+    fs.rmSync(fixture.fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('YouTube OAuth workspace binding fails closed when channel ID is missing or invalid', () => {
+  process.env.WORKSPACE_ID = 'creator-pod-alpha';
+  process.env.WORKSPACE_ACCOUNT_ID = 'creator-ai-ops';
+  process.env.WORKSPACE_RUNTIME_DIR = path.join(process.cwd(), 'runtime', 'creator-pod-alpha');
+  process.env.WORKSPACE_ACCOUNT_ROOT_DIR = path.join(process.cwd(), 'runtime', 'creator-pod-alpha', 'creator-ai-ops');
+  process.env.WORKSPACE_STRICT_MODE = 'true';
+  delete process.env.YOUTUBE_CHANNEL_ID;
+  assert.throws(
+    () => assertChannelBoundWorkspaceRuntime(),
+    error => error.code === 'YOUTUBE_CHANNEL_BINDING_REQUIRED' && error.status === 403
+  );
+  process.env.YOUTUBE_CHANNEL_ID = 'UC' + 'c'.repeat(22);
+  assert.equal(assertChannelBoundWorkspaceRuntime().channelId, process.env.YOUTUBE_CHANNEL_ID);
 });
