@@ -9,7 +9,8 @@
       "enabled": true,
       "port": 4567,
       "envFile": "tests/fixtures/workspace/account.env",
-      "runtimeDir": "tests/fixtures/workspace/runtime/fixture-account"
+      "runtimeDir": "tests/fixtures/workspace/runtime/fixture-account",
+      "youtubeChannelId": "UCaaaaaaaaaaaaaaaaaaaaaa"
     }
   ]
 }
