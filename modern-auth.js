@@ -6,11 +6,11 @@ const http = require('http');
 const { URL } = require('url');
 const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
 const { YOUTUBE_OAUTH_SCOPES } = require('./utils/youtube-oauth-scopes');
-const { assertIsolatedWorkspaceRuntime } = require('./utils/workspace-runtime');
+const { assertChannelBoundWorkspaceRuntime } = require('./utils/workspace-runtime');
 
 class ModernAuth {
   constructor() {
-    this.runtime = assertIsolatedWorkspaceRuntime();
+    this.runtime = assertChannelBoundWorkspaceRuntime();
     this.credentialsPath = path.join(this.runtime.configDir, 'credentials.json');
     this.tokensPath = path.join(this.runtime.configDir, 'tokens.json');
     this.server = null;
