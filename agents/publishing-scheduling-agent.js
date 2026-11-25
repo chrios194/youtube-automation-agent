@@ -7,6 +7,7 @@ const { assertValidYouTubeMetadata } = require('../utils/youtube-metadata-valida
 const { getYouTubeComplianceState, assertYouTubeComplianceGate, assertMadeForKidsDeclaration } = require('../utils/youtube-compliance-gate');
 const { requireWriteActionConsent, hashWritePayload } = require('../utils/youtube-write-action-consent');
 const { verifyMediaSourceProvenance } = require('../utils/media-source-provenance');
+const { assertChannelBoundWorkspaceRuntime } = require('../utils/workspace-runtime');
 
 class PublishingSchedulingAgent {
   constructor(db, credentials, options = {}) {
@@ -25,7 +26,19 @@ class PublishingSchedulingAgent {
     this.complianceBlocked = false;
   }
 
+  assertChannelBinding() {
+    const runtime = assertChannelBoundWorkspaceRuntime();
+    if (this.channelId !== runtime.channelId) {
+      const error = new Error('The publishing agent channel ID must match the exact channel bound to this isolated workspace account');
+      error.status = 403;
+      error.code = 'YOUTUBE_CHANNEL_BINDING_MISMATCH';
+      throw error;
+    }
+    return runtime;
+  }
+
   async requireWriteActionConsent(apiAction, capability, resourceScope, payload, visibility = null) {
+    this.assertChannelBinding();
     const authorizingUserId = typeof this.getAuthorizingUserId === 'function'
       ? await this.getAuthorizingUserId()
       : null;
@@ -60,6 +73,7 @@ class PublishingSchedulingAgent {
   async setupYouTubeAPI() {
     try {
       this.assertYouTubeComplianceGate('YouTube API initialization');
+      this.assertChannelBinding();
       const auth = this.credentials.getYouTubeAuth();
       this.youtube = google.youtube({ version: 'v3', auth });
       this.logger.info('YouTube API initialized');
@@ -248,6 +262,7 @@ class PublishingSchedulingAgent {
 
   async uploadToYouTube(scheduleEntry) {
     this.assertYouTubeComplianceGate('YouTube video upload');
+    this.assertChannelBinding();
     const { metadata } = scheduleEntry;
     const selfDeclaredMadeForKids = assertMadeForKidsDeclaration(metadata.selfDeclaredMadeForKids);
     const validation = assertValidYouTubeMetadata(metadata.seo);
@@ -360,6 +375,7 @@ class PublishingSchedulingAgent {
 
   async reconcileUploadedVideo(scheduleEntry) {
     this.assertYouTubeComplianceGate('YouTube upload reconciliation');
+    this.assertChannelBinding();
     const response = await this.youtube.videos.list({ part: 'id,status', id: scheduleEntry.youtubeId });
     if (!response.data.items?.some(video => video.id === scheduleEntry.youtubeId)) {
       scheduleEntry.status = 'reconciliation_required';
