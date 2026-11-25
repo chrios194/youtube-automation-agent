@@ -1,6 +1,7 @@
 const path = require('path');
 
 const ACCOUNT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}$/;
+const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[A-Za-z0-9_-]{22}$/;
 
 function hasWorkspaceAccount() {
   return Boolean(process.env.WORKSPACE_ACCOUNT_ID);
@@ -21,6 +22,7 @@ function resolveDirectory(value, fallback) {
 function getWorkspaceRuntime() {
   const accountId = process.env.WORKSPACE_ACCOUNT_ID || null;
   const workspaceId = process.env.WORKSPACE_ID || null;
+  const channelId = process.env.YOUTUBE_CHANNEL_ID || process.env.AIOS_YOUTUBE_CHANNEL_ID || null;
   const rootDir = path.resolve(process.env.WORKSPACE_RUNTIME_DIR || path.join(__dirname, '..', 'runtime'));
 
   if (!accountId) {
@@ -29,6 +31,7 @@ function getWorkspaceRuntime() {
       workspaceId,
       accountId: null,
       accountName: null,
+      channelId,
       rootDir,
       dataDir: path.join(__dirname, '..', 'data'),
       configDir: path.join(__dirname, '..', 'config'),
@@ -58,6 +61,7 @@ function getWorkspaceRuntime() {
     workspaceId,
     accountId,
     accountName: process.env.WORKSPACE_ACCOUNT_NAME || accountId,
+    channelId,
     rootDir,
     accountRoot,
     dataDir,
@@ -65,6 +69,17 @@ function getWorkspaceRuntime() {
     host: process.env.WORKSPACE_HOST || process.env.HOST || '127.0.0.1',
     strictMode: process.env.WORKSPACE_STRICT_MODE === 'true'
   };
+}
+
+function assertChannelBoundWorkspaceRuntime(runtime = getWorkspaceRuntime()) {
+  assertIsolatedWorkspaceRuntime(runtime);
+  if (!runtime.channelId || !YOUTUBE_CHANNEL_ID_PATTERN.test(runtime.channelId)) {
+    const error = new Error('YouTube OAuth and token operations require one exact channel ID bound to this isolated workspace account');
+    error.code = 'YOUTUBE_CHANNEL_BINDING_REQUIRED';
+    error.status = 403;
+    throw error;
+  }
+  return runtime;
 }
 
 function assertIsolatedWorkspaceRuntime(runtime = getWorkspaceRuntime()) {
@@ -82,7 +97,9 @@ function assertIsolatedWorkspaceRuntime(runtime = getWorkspaceRuntime()) {
 
 module.exports = {
   ACCOUNT_ID_PATTERN,
+  YOUTUBE_CHANNEL_ID_PATTERN,
   assertWorkspaceAccountId,
+  assertChannelBoundWorkspaceRuntime,
   assertIsolatedWorkspaceRuntime,
   getWorkspaceRuntime,
   hasWorkspaceAccount
