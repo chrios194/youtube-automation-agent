@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
 const { spawn } = require('child_process');
-const { ACCOUNT_ID_PATTERN } = require('./utils/workspace-runtime');
+const { ACCOUNT_ID_PATTERN, YOUTUBE_CHANNEL_ID_PATTERN } = require('./utils/workspace-runtime');
 
 const ROOT = __dirname;
 const DEFAULT_MANIFEST = path.join(ROOT, 'config', 'workspace.json');
@@ -95,6 +95,7 @@ async function validateManifest(manifestPath) {
   const seenConfigDirs = new Set();
   const seenApiKeys = new Set();
   const seenMasterKeys = new Set();
+  const seenChannelIds = new Set();
   const normalizedAccounts = [];
 
   for (const raw of manifest.accounts) {
@@ -103,6 +104,13 @@ async function validateManifest(manifestPath) {
     if (!ACCOUNT_ID_PATTERN.test(id)) fail(`Account id is invalid: ${id || '(missing)'}`);
     if (seenIds.has(id)) fail(`Duplicate account id: ${id}`);
     seenIds.add(id);
+
+    const youtubeChannelId = String(raw.youtubeChannelId || '');
+    if (!YOUTUBE_CHANNEL_ID_PATTERN.test(youtubeChannelId)) {
+      fail(`Account ${id} requires an exact YouTube channel ID (UC followed by 22 valid characters)`);
+    }
+    if (seenChannelIds.has(youtubeChannelId)) fail(`Duplicate YouTube channel ID: ${youtubeChannelId}`);
+    seenChannelIds.add(youtubeChannelId);
 
     const port = Number(raw.port);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) fail(`Account ${id} requires a port from 1024 to 65535`);
@@ -139,6 +147,7 @@ async function validateManifest(manifestPath) {
     normalizedAccounts.push({
       id,
       name: String(raw.name || id),
+      youtubeChannelId,
       enabled: raw.enabled !== false,
       port,
       envFile,
@@ -171,6 +180,8 @@ async function buildAccountEnvironment(config, account) {
     WORKSPACE_ID: config.workspaceId,
     WORKSPACE_ACCOUNT_ID: account.id,
     WORKSPACE_ACCOUNT_NAME: account.name,
+    YOUTUBE_CHANNEL_ID: account.youtubeChannelId,
+    AIOS_YOUTUBE_CHANNEL_ID: account.youtubeChannelId,
     WORKSPACE_RUNTIME_DIR: path.dirname(account.accountRoot),
     WORKSPACE_ACCOUNT_ROOT_DIR: account.accountRoot,
     WORKSPACE_DATA_DIR: account.dataDir,
