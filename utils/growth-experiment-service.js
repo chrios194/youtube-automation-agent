@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const { Logger } = require('./logger');
+const { getYouTubeComplianceState, assertYouTubeComplianceGate, assertDerivedMetricsGate } = require('./youtube-compliance-gate');
 
 const ACTIVE_STATUSES = new Set(['draft', 'approved', 'running', 'awaiting_winner', 'action_required']);
 
@@ -10,6 +11,9 @@ class GrowthExperimentService {
     this.publishing = publishing;
     this.logger = options.logger || new Logger('GrowthExperiments');
     this.now = options.now || (() => new Date());
+    this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    this.assertDerivedMetricsGate = options.assertDerivedMetricsGate || assertDerivedMetricsGate;
     this.activeRefreshes = new Set();
   }
 
@@ -21,6 +25,8 @@ class GrowthExperimentService {
   }
 
   async create(input = {}) {
+    this.assertYouTubeComplianceGate('YouTube API Data-derived growth experiment creation');
+    this.assertDerivedMetricsGate('YouTube API Data-derived growth experiment creation');
     const productionId = String(input.productionId || '').trim();
     if (!productionId) throw this.error('Choose a published production to test');
     const armDurationHours = Number(input.armDurationHours || 48);
@@ -105,6 +111,8 @@ class GrowthExperimentService {
   }
 
   async start(id, input = {}) {
+    this.assertYouTubeComplianceGate('YouTube Analytics API Data collection for growth experiments');
+    this.assertDerivedMetricsGate('YouTube API Data-derived growth experiment');
     const experiment = await this.requireExperiment(id);
     if (experiment.status !== 'approved' || !experiment.approvedAt) {
       throw this.error('Approve the experiment plan before starting it', 409, 'EXPERIMENT_APPROVAL_REQUIRED');
@@ -136,6 +144,8 @@ class GrowthExperimentService {
   }
 
   async refresh(id, options = {}) {
+    this.assertYouTubeComplianceGate('YouTube Analytics API Data collection for growth experiments');
+    this.assertDerivedMetricsGate('YouTube API Data-derived growth experiment');
     if (this.activeRefreshes.has(id)) {
       throw this.error('This experiment is already refreshing', 409, 'EXPERIMENT_BUSY');
     }
@@ -148,6 +158,8 @@ class GrowthExperimentService {
   }
 
   async refreshUnlocked(id, options = {}) {
+    this.assertYouTubeComplianceGate('YouTube Analytics API Data collection for growth experiments');
+    this.assertDerivedMetricsGate('YouTube API Data-derived growth experiment');
     const experiment = await this.requireExperiment(id);
     if (experiment.status !== 'running') throw this.error('Only a running experiment can collect evidence', 409);
     const arm = experiment.arms.find(candidate => candidate.id === experiment.currentArmId);
@@ -206,6 +218,8 @@ class GrowthExperimentService {
   }
 
   async adoptWinner(id, input = {}) {
+    this.assertYouTubeComplianceGate('YouTube API Data-derived winner adoption');
+    this.assertDerivedMetricsGate('YouTube API Data-derived winner adoption');
     const experiment = await this.requireExperiment(id);
     if (experiment.status !== 'awaiting_winner' || !experiment.winningArmId) {
       throw this.error('This experiment has no evidence-backed winner to adopt', 409);
@@ -243,6 +257,8 @@ class GrowthExperimentService {
   }
 
   async cancel(id, input = {}) {
+    this.assertYouTubeComplianceGate('YouTube API Data-derived experiment cancellation/restore');
+    this.assertDerivedMetricsGate('YouTube API Data-derived experiment cancellation/restore');
     const experiment = await this.requireExperiment(id);
     if (!['draft', 'approved', 'running', 'action_required'].includes(experiment.status)) {
       throw this.error('This experiment can no longer be cancelled', 409);
@@ -259,6 +275,17 @@ class GrowthExperimentService {
   }
 
   async refreshDue() {
+    const compliance = this.getYouTubeComplianceState();
+    if (!compliance.allowed) {
+      this.logger.warn('Growth experiment refresh is disabled by the YouTube API Data compliance gate');
+      return 0;
+    }
+    try {
+      this.assertDerivedMetricsGate('YouTube API Data-derived growth experiment refresh');
+    } catch (error) {
+      this.logger.warn('Growth experiment refresh is disabled until the derived-metrics exception is approved: ' + error.message);
+      return 0;
+    }
     const running = await this.db.listGrowthExperiments({ status: 'running', limit: 50 });
     let refreshed = 0;
     let failed = 0;
@@ -279,6 +306,8 @@ class GrowthExperimentService {
   }
 
   async getSummary() {
+    this.assertYouTubeComplianceGate('YouTube API Data-derived growth experiment summary');
+    this.assertDerivedMetricsGate('YouTube API Data-derived growth experiment summary');
     const experiments = await this.db.listGrowthExperiments({ limit: 25 });
     const rows = await this.db.getAllRows(
       `SELECT p.id AS production_id, ps.title, ps.youtube_id, cr.editor_data
@@ -306,6 +335,8 @@ class GrowthExperimentService {
   }
 
   async evaluate(experiment) {
+    this.assertYouTubeComplianceGate('YouTube API Data-derived experiment evaluation');
+    this.assertDerivedMetricsGate('YouTube API Data-derived experiment evaluation');
     const samples = await this.db.listExperimentSamples(experiment.id, 1000);
     const arms = experiment.arms.map(arm => {
       const armSamples = samples.filter(sample => sample.armId === arm.id);
@@ -358,6 +389,7 @@ class GrowthExperimentService {
   }
 
   calculateArmResult(start = {}, end = {}) {
+    this.assertDerivedMetricsGate('YouTube API Data-derived experiment arm scoring');
     const impressions = Math.max(0, Number(end.impressions || 0) - Number(start.impressions || 0));
     const clicks = Math.max(0, Number(end.clicks || 0) - Number(start.clicks || 0));
     const views = Math.max(0, Number(end.views || 0) - Number(start.views || 0));
@@ -400,6 +432,8 @@ class GrowthExperimentService {
   }
 
   async captureMetrics(videoId) {
+    this.assertYouTubeComplianceGate('YouTube Analytics API Data collection for growth experiments');
+    this.assertDerivedMetricsGate('YouTube API Data-derived experiment metrics');
     const report = await this.analytics.analyzeVideoPerformance(videoId, { measurementWindow: 'rolling' });
     if (!report || report.analytics?.simulated) {
       throw this.error('Real YouTube analytics are unavailable; simulated evidence cannot advance an experiment', 409, 'EXPERIMENT_EVIDENCE_UNAVAILABLE');
@@ -428,6 +462,8 @@ class GrowthExperimentService {
   }
 
   async applyArm(experiment, arm, previousArm) {
+    this.assertYouTubeComplianceGate('YouTube video packaging write');
+    this.assertDerivedMetricsGate('YouTube API Data-derived experiment packaging decision');
     if (!arm) throw this.error('Experiment arm is missing', 409, 'EXPERIMENT_STATE_INVALID');
     await this.publishing.applyVideoPackaging(experiment.videoId, {
       title: arm.title,

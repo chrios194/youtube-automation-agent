@@ -4,7 +4,7 @@
 
 This release adds a **repeatable workspace launcher** for operating several independent creator-account systems in parallel. It does not convert one local AgentTube instance into a global multi-tenant platform. Instead, each creator account runs in its own isolated process, with its own database, configuration directory, OAuth tokens, approval key, dashboard port, job scheduler, production assets, and analytics history.
 
-> **Workspace model:** One bounded workspace launches multiple independent account processes. Each account process remains a single-channel AgentTube system. Run multiple workspaces when the portfolio grows beyond the operational capacity or risk boundary of one workspace.
+> **Workspace model:** One bounded AgentTube Creator Automation application/API Client launches multiple independent single-channel account processes. Each account has its own database, configuration directory, OAuth tokens, approval key, dashboard port, scheduler, production assets, and analytics history. Channels are account contexts, not separate API Clients or API Projects. If YouTube API credentials are ever approved, this application receives exactly one exclusive API Project; never create a project per channel.
 
 This matches the portfolio strategy: scale through controlled, repeatable systems rather than placing every creator identity, channel credential, customer relationship, and automation loop inside one global process.
 
@@ -12,7 +12,7 @@ This matches the portfolio strategy: scale through controlled, repeatable system
 
 | Boundary | Account-level isolation |
 |---|---|
-| **YouTube authorization** | Each account stores its own `credentials.json` and `tokens.json` under its workspace runtime directory. |
+| **YouTube authorization** | Each account is bound to one unique `youtubeChannelId` and stores its own `credentials.json` and `tokens.json` under its workspace runtime directory. OAuth/token operations fail closed if the channel binding is missing or mismatched. |
 | **Production data** | Each account uses its own SQLite database and generated asset paths. |
 | **Automation** | Each account has its own scheduler, queue, content buffer, publishing cadence, and analytics loop. |
 | **Dashboard** | Each account is served on its own local port and requires its own API key in workspace strict mode. |
@@ -31,7 +31,7 @@ The workspace launcher starts and monitors the bounded group of processes. The o
 cp config/workspace.example.json config/workspace.json
 ```
 
-2. For each account, create the account runtime and environment file shown in the manifest. The environment file must define a unique API key of at least 24 characters, plus any account-specific provider and channel settings.
+2. For each account, set an exact, unique `youtubeChannelId` in the workspace manifest (`UC` followed by 22 valid characters), then create the account runtime and environment file shown in the manifest. The environment file must define a unique API key of at least 24 characters and a unique `AGENTTUBE_MASTER_KEY` of at least 32 characters, plus account-specific provider settings. Do not copy YouTube tokens or secrets between accounts.
 
 ```bash
 mkdir -p runtime/creator-pod-alpha/creator-ai-ops
@@ -79,6 +79,7 @@ node workspace.js start --account creator-ai-ops
 | `host` | Yes | Bind host. Use `127.0.0.1` unless a secured reverse proxy and access policy are intentionally configured. |
 | `accounts[].id` | Yes | Lowercase account identifier, unique within the workspace. |
 | `accounts[].name` | Yes | Operator-readable creator or channel label. |
+| `accounts[].youtubeChannelId` | Yes | Exact YouTube channel ID (`UC` + 22 valid characters); must be unique across the workspace and bound to exactly one account process. |
 | `accounts[].enabled` | No | Defaults to enabled. Disabled accounts are validated but not launched. |
 | `accounts[].port` | Yes | Unique local port from 1024 through 65535. |
 | `accounts[].envFile` | Yes | Account-specific environment file. It must define a unique `API_KEY`. |
@@ -86,6 +87,12 @@ node workspace.js start --account creator-ai-ops
 | `accounts[].dataDir` / `configDir` | No | When supplied, they must remain inside `runtimeDir`. |
 
 The launcher rejects duplicate account IDs, ports, data paths, configuration paths, unsafe identifiers, missing environment files, weak keys, and directories outside an account runtime root.
+
+## Channel-bound authorization and API Project boundary
+
+Each workspace account represents exactly one channel. The validator requires a real channel ID in the manifest, rejects missing, malformed, or duplicate channel IDs, and passes the exact ID to both `YOUTUBE_CHANNEL_ID` and `AIOS_YOUTUBE_CHANNEL_ID` in that account's child environment. OAuth constructors, credential setup, API-client initialization, and write-consent checks require the strict account runtime and matching channel binding.
+
+This is **channel/token isolation within one actual software application**, not one API Client per channel. The application boundary is the AgentTube Creator Automation Node.js/Express publisher product in this repository. The separate AgentTube Next.js/Convex video-analysis application is a distinct API Client candidate and must never share this application's API Project or credentials. Project creation and credentials remain blocked until the product boundary, child-directed status, scopes, audit, and deployed controls are approved. If approved, create exactly one exclusive project for this publisher application; do not create per-channel projects or quota shards.
 
 ## Approval and publication policy
 
@@ -118,3 +125,16 @@ The launcher does not provide cross-account queue balancing, pooled model budget
 ## Transition to the portfolio control plane
 
 A later centralized portfolio layer should consume account-level exports or approved read-only API events. It should not directly merge all account databases, credentials, customer data, or approval keys. The migration threshold is reached when shared portfolio analytics, cross-creator experiments, commerce attribution, multi-user roles, or worker orchestration require capabilities that a bounded independent workspace cannot provide safely.
+
+## YouTube API Client boundary
+
+All workspace accounts launched from this AgentTube codebase are account instances of the same software product, not separate YouTube API Clients merely because they use different channels, account IDs, ports, databases, or runtime directories. If AgentTube is approved to use YouTube API credentials, the product uses exactly one API Project exclusive to AgentTube. Do not create per-channel/per-account projects or multiply projects to obtain more quota.
+
+Each account keeps its own `config/credentials.json` and `config/tokens.json` inside its unique runtime/config directory. User authorization tokens must never be reused across accounts. The number of account-local token namespaces is independent of the API Project count.
+
+The YouTube API Client compliance gate in `config/youtube-api-client-compliance.json` blocks OAuth setup and publishing until the product boundary, child-directed assessment, required compliance audit/approval, and one-project mapping are documented. The current state is blocked. Do not create an API Project or credentials while blocked.
+
+
+## YouTube OAuth isolation boundary
+
+YouTube OAuth and token operations are disabled outside strict per-account workspace mode. Root mode does not load the legacy shared YouTube token file and cannot write it; the existing file, if present, is left untouched rather than deleted. The legacy `modern-auth.js` and `oauth-server.js` entrypoints now resolve credential and token files only inside the selected account's `WORKSPACE_CONFIG_DIR`; they reject root-mode invocation. The shared `CredentialManager` likewise requires an isolated strict workspace before YouTube credential setup, authorization, or API access. Non-YouTube provider configuration remains separate. Use `node workspace.js credentials --account <account-id>` for account-scoped setup. This is an isolation control, not permission to create API Projects or credentials; the YouTube compliance gate remains independently fail-closed.

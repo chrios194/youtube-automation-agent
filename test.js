@@ -5,6 +5,43 @@ const { AudienceEngagementService } = require('./utils/audience-engagement-servi
 const { DailyAutomation } = require('./schedules/daily-automation');
 const chalk = require('chalk');
 const path = require('path');
+
+const TEST_YOUTUBE_COMPLIANCE_CONFIG = {
+  apiClient: { id: 'test-api-client' },
+  apiProject: { oauthClientId: 'test-client' }
+};
+const ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS = {
+  getYouTubeComplianceState: () => ({ allowed: true, blockers: [], config: TEST_YOUTUBE_COMPLIANCE_CONFIG }),
+  assertYouTubeComplianceGate: () => ({ allowed: true, blockers: [], config: TEST_YOUTUBE_COMPLIANCE_CONFIG }),
+  assertDerivedMetricsGate: () => ({ allowed: true, blockers: [], derivedMetrics: { enabled: true } })
+};
+function testWriteConsentOptions(channelId = 'UC_test_channel') {
+  return {
+    ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
+    apiClientId: TEST_YOUTUBE_COMPLIANCE_CONFIG.apiClient.id,
+    channelId,
+    getChannelId: async () => channelId,
+    getAuthorizingUserId: async () => 'test-operator',
+    getWriteActionConsent: async request => ({
+      consentId: 'test-consent-' + request.apiAction + '-' + Date.now(),
+      status: 'approved',
+      consentScope: 'single_action',
+      apiClientId: request.apiClientId,
+      channelId: request.channelId,
+      apiAction: request.apiAction,
+      capability: request.capability,
+      resourceScope: request.resourceScope,
+      authorizingUserId: request.authorizingUserId,
+      approvedBy: request.authorizingUserId,
+      approvedAt: new Date().toISOString(),
+      approvedPayloadHash: request.approvedPayloadHash,
+      approvedVisibility: request.approvedVisibility,
+      revokedAt: null,
+      consumedAt: null
+    }),
+    consumeWriteActionConsent: async () => true
+  };
+}
 const { ProductionReadinessService } = require('./utils/production-readiness-service');
 const { normalizeTags, validateYouTubeMetadata } = require('./utils/youtube-metadata-validator');
 
@@ -56,11 +93,14 @@ class SystemTest {
       { name: 'Engagement Insight Store', test: () => this.testEngagementInsightStore() },
       { name: 'Reply Draft Lifecycle Store', test: () => this.testReplyDraftStore() },
       { name: 'YouTube Scope Detection', test: () => this.testYouTubeScopeDetection() },
+      { name: 'Legacy OAuth Entry Points Respect Compliance Gate', test: () => this.testLegacyOAuthEntryPointsRespectComplianceGate() },
+      { name: 'Walkthrough Does Not Prompt for Unapproved YouTube Projects', test: () => this.testWalkthroughBlocksUnapprovedYouTubeSetup() },
+      { name: 'Setup Defaults YouTube Publishing to Disabled', test: () => this.testSetupDefaultsPublishingDisabled() },
       { name: 'Audience Comment Sync', test: () => this.testAudienceCommentSync() },
       { name: 'Audience Comment Analysis', test: () => this.testAudienceCommentAnalysis() },
       { name: 'Audience Idea Mining', test: () => this.testAudienceIdeaMining() },
       { name: 'Reply Drafting', test: () => this.testReplyDrafting() },
-      { name: 'Reply Approval and Posting', test: () => this.testReplyApprovalAndPosting() },
+      { name: 'Automated Comment Posting Prohibited', test: () => this.testReplyApprovalAndPosting() },
       { name: 'Engagement AI Provider Wiring', test: () => this.testEngagementAIProviderWiring() },
       { name: 'Engagement Sync Schedule', test: () => this.testEngagementSyncSchedule() },
       { name: 'Growth Experiment Refresh Schedule', test: () => this.testGrowthExperimentRefreshSchedule() }
@@ -386,7 +426,7 @@ class SystemTest {
         throw new Error('Channel strategy was not persisted correctly');
       }
 
-      const strategyAgent = new ContentStrategyAgent(db, {});
+      const strategyAgent = new ContentStrategyAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       strategyAgent.analyzeTrends = async function() {
         this.trendingTopics = [{
           topic: 'practical AI workflows', score: 8, sources: ['trending'],
@@ -1520,7 +1560,7 @@ class SystemTest {
         { id: 'short-source-3', label: 'Result', scriptText: 'Render locally and review every Short before it reaches the schedule.', prompt: 'Result', duration: 1.3, assetType: 'video', assetPath: sourceVideo, audioPath, status: 'ready', narrationStatus: 'current', rightsConfirmed: true }
       ]);
 
-      const publishing = new PublishingSchedulingAgent(db, {});
+      const publishing = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       const service = new ShortsRepurposingService(db, publishing, {
         dataRoot: path.join(directory, 'shorts'), width: 360, height: 640, logger: this.logger
       });
@@ -1546,8 +1586,16 @@ class SystemTest {
         approvalBlocked = error.code === 'SHORT_APPROVAL_REQUIRED';
       }
       if (!approvalBlocked) throw new Error('Short scheduling bypassed explicit approval confirmation');
+      let madeForKidsBlocked = false;
+      try {
+        await service.approve(productionId, rendered.id, { confirmed: true, privacyStatus: 'private' });
+      } catch (error) {
+        madeForKidsBlocked = error.code === 'MADE_FOR_KIDS_DECLARATION_REQUIRED';
+      }
+      if (!madeForKidsBlocked) throw new Error('Short approval did not require an explicit Made for Kids declaration');
       const scheduled = await service.approve(productionId, rendered.id, {
-        confirmed: true, publishTime: new Date(Date.now() + 172800000).toISOString(), privacyStatus: 'private'
+        confirmed: true, publishTime: new Date(Date.now() + 172800000).toISOString(), privacyStatus: 'private',
+        selfDeclaredMadeForKids: false
       });
       const schedule = await db.getLatestScheduleEntry(rendered.id);
       if (
@@ -1637,7 +1685,7 @@ class SystemTest {
         throw new Error('Generated research sources and claims were not initialized as unresolved provenance');
       }
 
-      const publishGuard = new PublishingSchedulingAgent(db, {});
+      const publishGuard = new PublishingSchedulingAgent(db, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       publishGuard.publishQueue = [{ productionId, status: 'scheduled', metadata: {} }];
       let blockedPublishRejected = false;
       try {
@@ -1674,16 +1722,30 @@ class SystemTest {
       }
 
       let uploadRequest;
-      const publishing = new PublishingSchedulingAgent(db, {});
+      const { hashFile } = require('./utils/media-source-provenance');
+      const publishing = new PublishingSchedulingAgent(db, {}, testWriteConsentOptions('UC_test_channel'));
       publishing.youtube = {
         videos: { insert: async request => { uploadRequest = request; return { data: { id: 'provenance-video' } }; } }
+      };
+      const mediaProvenance = {
+        sourceType: 'original_created',
+        sourceRef: 'test-fixture:' + productionId,
+        creationRecordRef: 'test-fixture:' + productionId,
+        sha256: await hashFile(videoPath),
+        downloadedWithoutYouTubePriorWrittenApproval: false,
+        importedWithoutYouTubePriorWrittenApproval: false,
+        backedUpWithoutYouTubePriorWrittenApproval: false,
+        cachedWithoutYouTubePriorWrittenApproval: false,
+        storedWithoutYouTubePriorWrittenApproval: false,
+        publicYouTubeUrlIsPermissionToDownload: false
       };
       await publishing.uploadToYouTube({
         publishTime: new Date(Date.now() + 86400000).toISOString(),
         metadata: {
           seo: production.seo,
-          video: { path: videoPath },
+          video: { path: videoPath, mediaProvenance },
           privacyStatus: 'private',
+          selfDeclaredMadeForKids: false,
           containsSyntheticMedia: true
         }
       });
@@ -2082,11 +2144,11 @@ class SystemTest {
     };
     const agent = new PublishingSchedulingAgent({
       updateScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
     agent.publishQueue = [
-      { productionId: 'prod-a', title: 'A', status: 'scheduled', metadata: { audio: intentionalAudio } },
-      { productionId: 'prod-b', title: 'B', status: 'scheduled', metadata: { audio: intentionalAudio } }
+      { productionId: 'prod-a', title: 'A', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } },
+      { productionId: 'prod-b', title: 'B', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } }
     ];
     agent.uploadToYouTube = async () => ({ id: 'youtube-1' });
 
@@ -2096,8 +2158,8 @@ class SystemTest {
       throw new Error('publishContent removed the wrong publish queue entries');
     }
 
-    const missingNarration = new PublishingSchedulingAgent({ updateScheduleEntry: async () => {} }, {});
-    missingNarration.publishQueue = [{ productionId: 'prod-no-audio', status: 'scheduled', metadata: {} }];
+    const missingNarration = new PublishingSchedulingAgent({ updateScheduleEntry: async () => {} }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
+    missingNarration.publishQueue = [{ productionId: 'prod-no-audio', status: 'scheduled', metadata: { selfDeclaredMadeForKids: false } }];
     missingNarration.uploadToYouTube = async () => { throw new Error('Upload must not start without narration'); };
     let narrationPublishBlocked = false;
     try {
@@ -2121,9 +2183,9 @@ class SystemTest {
     let uncertainUpdates = [];
     const uncertain = new PublishingSchedulingAgent({
       updateScheduleEntry: async entry => uncertainUpdates.push({ ...entry })
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
     uncertain.publishQueue = [
-      { id: 'schedule-uncertain', productionId: 'prod-uncertain', title: 'Uncertain', status: 'scheduled', metadata: { audio: intentionalAudio } }
+      { id: 'schedule-uncertain', productionId: 'prod-uncertain', title: 'Uncertain', status: 'scheduled', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false } }
     ];
     let uploadAttempts = 0;
     uncertain.uploadToYouTube = async entry => {
@@ -2151,12 +2213,12 @@ class SystemTest {
     let reconciliationCalls = 0;
     const recorded = {
       id: 'schedule-recorded', productionId: 'prod-recorded', title: 'Recorded', status: 'uploaded',
-      youtubeId: 'youtube-existing', metadata: { audio: intentionalAudio }
+      youtubeId: 'youtube-existing', metadata: { audio: intentionalAudio, selfDeclaredMadeForKids: false }
     };
     const reconcile = new PublishingSchedulingAgent({
       getLatestScheduleEntry: async () => recorded,
       updateScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
     reconcile.youtube = {
       videos: {
         list: async () => {
@@ -2206,9 +2268,18 @@ class SystemTest {
       }
 
       manager.credentials = { openai: { apiKey: 'sk-test' } };
-      const missingYouTube = manager.getMissingCredentials();
+      const youtubeOptionalWhileBlocked = manager.getMissingCredentials();
+      if (youtubeOptionalWhileBlocked.length !== 0) {
+        throw new Error('YouTube credentials were required while the compliance gate is closed');
+      }
+      const gateOpenManager = new CredentialManager({
+        getYouTubeComplianceState: () => ({ allowed: true, blockers: [] }),
+        assertYouTubeComplianceGate: () => ({ allowed: true, config: { apiProject: { oauthClientId: 'approved-client' } } })
+      });
+      gateOpenManager.credentials = { openai: { apiKey: 'sk-test' } };
+      const missingYouTube = gateOpenManager.getMissingCredentials();
       if (missingYouTube.length !== 1 || missingYouTube[0] !== 'youtube') {
-        throw new Error('Missing YouTube credentials were not detected');
+        throw new Error('Missing YouTube credentials were not detected after the compliance gate was approved');
       }
     } finally {
       for (const key of envKeys) {
@@ -2312,7 +2383,7 @@ class SystemTest {
     const { PublishingSchedulingAgent } = require('./agents/publishing-scheduling-agent');
     const agent = new PublishingSchedulingAgent({
       saveScheduleEntry: async () => {}
-    }, {});
+    }, {}, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
     const simulated = await agent.scheduleContent({
       id: 'prod-simulated',
@@ -2335,7 +2406,7 @@ class SystemTest {
     const missingNarration = await agent.scheduleContent({
       id: 'prod-no-narration', script: { title: 'No narration' }, priority: 50,
       scheduledPublishTime: new Date().toISOString(),
-      assets: { finalVideo: { path: 'video.mp4' } }, seo: {}
+      assets: { finalVideo: { path: 'video.mp4' } }, seo: {}, selfDeclaredMadeForKids: false
     });
     if (missingNarration !== null) throw new Error('Production without narration was scheduled for publishing');
 
@@ -2352,7 +2423,8 @@ class SystemTest {
           silenceConfirmedAt: new Date().toISOString()
         }
       },
-      seo: {}
+      seo: {},
+      selfDeclaredMadeForKids: false
     });
     if (!real || agent.publishQueue.length !== 1) {
       throw new Error('Real production was not scheduled for publishing');
@@ -2721,6 +2793,63 @@ class SystemTest {
     this.logger.info('Agent loading test completed successfully');
   }
 
+  async testSetupDefaultsPublishingDisabled() {
+    const fs = require('fs');
+    const path = require('path');
+    const source = fs.readFileSync(path.join(__dirname, 'setup.js'), 'utf8');
+    if (!source.includes('AUTO_PUBLISH_ENABLED=false')) throw new Error('New setup must default AUTO_PUBLISH_ENABLED to false');
+    if (source.includes('AUTO_PUBLISH_ENABLED=true')) throw new Error('New setup must not enable YouTube publishing by default');
+    this.logger.info('Setup publishing-default test completed successfully');
+  }
+
+  async testWalkthroughBlocksUnapprovedYouTubeSetup() {
+    const { SetupWalkthrough } = require('./walkthrough');
+    const inquirer = require('inquirer');
+    const walkthrough = new SetupWalkthrough();
+    const originalPrompt = inquirer.prompt;
+    const originalLog = console.log;
+    let prompted = false;
+    inquirer.prompt = async () => {
+      prompted = true;
+      return { action: 'connect' };
+    };
+    console.log = () => {};
+    try {
+      await walkthrough.stepYouTube();
+    } finally {
+      inquirer.prompt = originalPrompt;
+      console.log = originalLog;
+    }
+    if (prompted) throw new Error('Walkthrough prompted for YouTube project or credentials while compliance gate was blocked');
+    this.logger.info('Walkthrough fail-closed YouTube setup test completed successfully');
+  }
+
+  async testLegacyOAuthEntryPointsRespectComplianceGate() {
+    const { OAuthServer } = require('./oauth-server');
+    const { ModernAuth } = require('./modern-auth');
+    const oauth = new OAuthServer();
+    const modern = new ModernAuth();
+
+    const expectBlocked = async (label, action) => {
+      let blocked = false;
+      try {
+        await action();
+      } catch (error) {
+        blocked = error.code === 'YOUTUBE_COMPLIANCE_GATE_BLOCKED' && error.status === 409;
+      }
+      if (!blocked) throw new Error(label + ' bypassed the default-closed YouTube compliance gate');
+    };
+
+    await expectBlocked('OAuthServer.start', () => oauth.start());
+    await expectBlocked('OAuthServer.generateAuthUrl', () => oauth.generateAuthUrl());
+    await expectBlocked('OAuthServer.exchangeCodeForTokens', () => oauth.exchangeCodeForTokens('not-a-real-code'));
+    await expectBlocked('ModernAuth.authenticate', () => modern.authenticate());
+    await expectBlocked('ModernAuth.startTempServer', () => modern.startTempServer(0, {}));
+    await expectBlocked('ModernAuth.testAuthentication', () => modern.testAuthentication());
+
+    this.logger.info('Legacy OAuth entry-point compliance-gate test completed successfully');
+  }
+
   async testYouTubeScopeDetection() {
     const manager = new CredentialManager();
     const forceSsl = 'https://www.googleapis.com/auth/youtube.force-ssl';
@@ -2906,6 +3035,7 @@ class SystemTest {
           }]) ] }
       ];
       const service = new AudienceEngagementService(db, null, null, {
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
         listCommentThreads: async () => pages[0],
         getChannelId: async () => 'UC_channel_owner'
       });
@@ -2921,6 +3051,7 @@ class SystemTest {
 
       // Refusal policy: API failure stores nothing and rethrows
       const failing = new AudienceEngagementService(db, null, null, {
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
         listCommentThreads: async () => { throw new Error('quota exceeded'); },
         getChannelId: async () => 'UC_channel_owner'
       });
@@ -2933,6 +3064,7 @@ class SystemTest {
       const disabledError = new Error('disabled');
       disabledError.errors = [{ reason: 'commentsDisabled' }];
       const disabledService = new AudienceEngagementService(db, null, null, {
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
         listCommentThreads: async () => { throw disabledError; },
         getChannelId: async () => 'UC_channel_owner'
       });
@@ -2982,7 +3114,7 @@ class SystemTest {
       const service = new AudienceEngagementService(db, null, {
         isAvailable: () => true,
         generateText: async () => aiResponse
-      }, {});
+      }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
       const insight = await service.analyzeVideo(videoId);
       if (insight.analysisMethod !== 'ai') throw new Error('AI analysis was not recorded as ai');
@@ -3003,7 +3135,7 @@ class SystemTest {
       // Fallback: mechanical facts only, no themes
       const fallbackVideo = `${videoId}_fb`;
       await db.upsertAudienceComment({ commentId: `${fallbackVideo}_c1`, videoId: fallbackVideo, text: 'Is this real?', publishedAt: new Date().toISOString() });
-      const fallbackService = new AudienceEngagementService(db, null, { isAvailable: () => false }, {});
+      const fallbackService = new AudienceEngagementService(db, null, { isAvailable: () => false }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       const fallback = await fallbackService.analyzeVideo(fallbackVideo);
       if (fallback.analysisMethod !== 'fallback') throw new Error('Fallback method was not recorded');
       if (fallback.themes.length !== 0) throw new Error('Fallback must never invent themes');
@@ -3014,7 +3146,9 @@ class SystemTest {
       // syncDueVideos delegates and analyzes only after a fetching sync
       let analyzeCalls = 0;
       const dueService = new AudienceEngagementService(db, null, { isAvailable: () => false }, {
-        listCommentThreads: async () => ({ items: [] })
+        ...ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS,
+        listCommentThreads: async () => ({ items: [] }),
+        getChannelId: async () => 'UC_channel_owner'
       });
       dueService.analyzeVideo = async () => { analyzeCalls++; };
       const results = await dueService.syncDueVideos([
@@ -3042,7 +3176,7 @@ class SystemTest {
           text: `Please cover local caching next (${suffix})`, publishedAt: new Date().toISOString()
         });
       }
-      const service = new AudienceEngagementService(db, null, null, {});
+      const service = new AudienceEngagementService(db, null, null, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       const insight = {
         videoId, title: 'Mining test', analysisMethod: 'ai',
         themes: [
@@ -3105,7 +3239,7 @@ class SystemTest {
             { commentId: `${videoId}_scam1`, reply: 'Should never appear', rationale: 'Quarantined' }
           ]);
         }
-      }, {});
+      }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
 
       const drafts = await service.draftReplies(videoId);
       if (drafts.length !== 1) throw new Error(`Expected 1 usable draft (link + quarantined dropped), got ${drafts.length}`);
@@ -3114,7 +3248,7 @@ class SystemTest {
         throw new Error('Quarantined, owner, and nested comments must never reach the draft prompt');
       }
 
-      const noAI = new AudienceEngagementService(db, null, { isAvailable: () => false }, {});
+      const noAI = new AudienceEngagementService(db, null, { isAvailable: () => false }, ALLOW_YOUTUBE_COMPLIANCE_FOR_TESTS);
       let status = 0;
       try { await noAI.draftReplies(videoId); } catch (error) { status = error.status; }
       if (status !== 503) throw new Error('Drafting without AI must throw 503');
@@ -3134,71 +3268,52 @@ class SystemTest {
   async testReplyApprovalAndPosting() {
     const db = new Database();
     await db.initialize();
-    const videoId = `vid_post_${Date.now()}`;
+    const videoId = `vid_post_blocked_${Date.now()}`;
     const commentId = `${videoId}_target`;
-    const scopedCredentials = { hasYouTubeScope: scope => scope === 'https://www.googleapis.com/auth/youtube.force-ssl' };
     try {
       await db.upsertAudienceComment({ commentId, videoId, text: 'Question?', publishedAt: new Date().toISOString() });
-      const makeDraft = () => db.saveReplyDraft({ commentId, videoId, draftText: 'Answer text' });
-
-      let draft = await makeDraft();
-      const posts = [];
-      const service = new AudienceEngagementService(db, scopedCredentials, null, {
-        insertComment: async ({ parentId, text }) => { posts.push({ parentId, text }); return { id: 'yt_posted_1' }; }
+      const draft = await db.saveReplyDraft({ commentId, videoId, draftText: 'Answer text' });
+      let insertCalls = 0;
+      const service = new AudienceEngagementService(db, { hasYouTubeScope: () => true }, null, {
+        ...testWriteConsentOptions('UC_channel_owner'),
+        insertComment: async () => { insertCalls++; return { id: 'must-not-post' }; }
       });
 
-      let code = null;
-      try { await service.approveReplyDraft(draft.id, {}); } catch (error) { code = error.code; }
-      if (code !== 'REPLY_APPROVAL_REQUIRED') throw new Error('Approval must require confirmed: true');
-
-      const unscoped = new AudienceEngagementService(db, { hasYouTubeScope: () => false }, null, {});
-      code = null;
-      try { await unscoped.approveReplyDraft(draft.id, { confirmed: true }); } catch (error) { code = error.code; }
-      if (code !== 'REPLY_SCOPE_REQUIRED') throw new Error('Missing force-ssl scope must block posting');
-      const gate = unscoped.postingEnabled();
-      if (gate.enabled || gate.reason !== 'missing_scope') {
-        throw new Error('postingEnabled must report missing_scope');
+      const gate = service.postingEnabled();
+      if (gate.enabled || gate.reason !== 'automated_comment_posting_prohibited') {
+        throw new Error('Automated comment posting must remain disabled even when consent providers are injected');
       }
 
-      const posted = await service.approveReplyDraft(draft.id, { confirmed: true, editedText: 'Edited answer' });
-      if (posted.status !== 'posted' || posted.postedCommentId !== 'yt_posted_1') throw new Error('Posting evidence missing');
-      if (posts[0].parentId !== commentId || posts[0].text !== 'Edited answer') throw new Error('The edited text must be what posts');
-      if (!(await db.getAudienceComment(commentId)).repliedByAgent) throw new Error('Source comment must be marked replied');
+      let blocked = null;
+      try {
+        await service.approveReplyDraft(draft.id, { confirmed: true, editedText: 'Edited answer' });
+      } catch (error) {
+        blocked = error;
+      }
+      if (!blocked || blocked.status !== 403 || blocked.code !== 'AUTOMATED_ENGAGEMENT_POSTING_PROHIBITED') {
+        throw new Error('Comment posting must fail with the explicit policy block');
+      }
+      if (insertCalls !== 0) throw new Error('The YouTube comment adapter must never be called');
 
-      let status = null;
-      try { await service.approveReplyDraft(draft.id, { confirmed: true }); } catch (error) { status = error.status; }
-      if (status !== 409) throw new Error('A posted draft must not post twice');
+      const unchanged = await db.getReplyDraft(draft.id);
+      if (unchanged.status !== 'proposed' || unchanged.editedText !== null) {
+        throw new Error('A blocked post must not mutate or consume the review-only draft');
+      }
 
-      // Failure path: failed + reason, manual retry allowed
-      const failingComment = `${videoId}_fail`;
-      await db.upsertAudienceComment({ commentId: failingComment, videoId, text: 'Other?', publishedAt: new Date().toISOString() });
-      const failDraft = await db.saveReplyDraft({ commentId: failingComment, videoId, draftText: 'Will fail' });
-      const failing = new AudienceEngagementService(db, scopedCredentials, null, {
-        insertComment: async () => { throw new Error('commentThreadNotFound'); }
-      });
-      status = null;
-      try { await failing.approveReplyDraft(failDraft.id, { confirmed: true }); } catch (error) { status = error.status; }
-      if (status !== 502) throw new Error('A failed post must throw 502');
-      const failed = await db.getReplyDraft(failDraft.id);
-      if (failed.status !== 'failed' || !failed.failureReason.includes('commentThreadNotFound')) throw new Error('Failure evidence missing');
+      const edited = await service.updateReplyDraft(draft.id, { editedText: 'Review-only draft' });
+      if (edited.status !== 'proposed' || edited.editedText !== 'Review-only draft') {
+        throw new Error('Review-only drafts should remain editable');
+      }
+      const discarded = await service.updateReplyDraft(draft.id, { discard: true });
+      if (discarded.status !== 'discarded') throw new Error('Review-only draft discard failed');
 
-      // Daily cap
-      const capped = new AudienceEngagementService(db, scopedCredentials, null, { dailyReplyCap: 1, insertComment: async () => ({ id: 'x' }) });
-      status = null;
-      try { await capped.approveReplyDraft(failDraft.id, { confirmed: true }); } catch (error) { status = error.status; }
-      if (status !== 429) throw new Error('The daily reply cap must block further posts');
-
-      // updateReplyDraft rules
-      const edited = await service.updateReplyDraft(failDraft.id, { editedText: 'Retry text' });
-      if (edited.status !== 'proposed' || edited.editedText !== 'Retry text') throw new Error('Editing must re-open a failed draft');
-      const discarded = await service.updateReplyDraft(failDraft.id, { discard: true });
-      if (discarded.status !== 'discarded') throw new Error('Discard failed');
-
-      // Summary
       const summary = await service.getSummary();
-      if (summary.postedToday < 1) throw new Error('getSummary missed postedToday');
-      if (summary.postingEnabled !== true) throw new Error('getSummary posting flag is wrong');
-      if (!summary.evidencePolicy.includes('operator approval')) throw new Error('evidencePolicy text missing');
+      if (summary.postingEnabled !== false || summary.postingDisabledReason !== 'automated_comment_posting_prohibited') {
+        throw new Error('Summary must report automated comment posting as prohibited');
+      }
+      if (!summary.evidencePolicy.includes('Automated YouTube comment posting is prohibited')) {
+        throw new Error('Summary evidence policy must disclose the no-comment-write rule');
+      }
     } finally {
       await db.executeQuery('DELETE FROM audience_comments WHERE video_id = ?', [videoId]);
       await db.executeQuery('DELETE FROM reply_drafts WHERE video_id = ?', [videoId]);

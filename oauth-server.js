@@ -1,14 +1,28 @@
 const express = require('express');
 const { google } = require('googleapis');
-const fs = require('fs');
+const { readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('./utils/secret-store');
 const path = require('path');
 const chalk = require('chalk');
+const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
+const { YOUTUBE_OAUTH_SCOPES } = require('./utils/youtube-oauth-scopes');
+const { assertChannelBoundWorkspaceRuntime } = require('./utils/workspace-runtime');
 
 class OAuthServer {
   constructor() {
+    this.runtime = assertChannelBoundWorkspaceRuntime();
+    this.credentialsPath = path.join(this.runtime.configDir, 'credentials.json');
+    this.tokensPath = path.join(this.runtime.configDir, 'tokens.json');
     this.app = express();
     this.server = null;
     this.setupRoutes();
+  }
+
+  async loadCredentials() {
+    return readWorkspaceSecretFile(this.credentialsPath, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
+  async saveTokens(tokens) {
+    return writeWorkspaceSecretFile(this.tokensPath, { youtube: tokens }, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
   }
 
   setupRoutes() {
@@ -66,10 +80,8 @@ class OAuthServer {
   }
 
   async exchangeCodeForTokens(code) {
-    const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
-    const tokensPath = path.join(__dirname, 'config', 'tokens.json');
-    
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath));
+    assertYouTubeComplianceGate('Legacy OAuth token exchange');
+    const credentials = await this.loadCredentials();
     
     const oauth2Client = new google.auth.OAuth2(
       credentials.youtube.client_id,
@@ -80,11 +92,7 @@ class OAuthServer {
     const { tokens } = await oauth2Client.getToken(code);
     
     // Save tokens
-    const tokenData = {
-      youtube: tokens
-    };
-    
-    fs.writeFileSync(tokensPath, JSON.stringify(tokenData, null, 2));
+    await this.saveTokens(tokens);
     console.log(chalk.green('✅ Tokens saved successfully!'));
   }
 
@@ -104,15 +112,19 @@ class OAuthServer {
   }
 
   start() {
+    assertYouTubeComplianceGate('Legacy OAuth server startup');
     this.server = this.app.listen(8080, () => {
       console.log(chalk.cyan('\n🔐 OAuth callback server started on http://localhost:8080'));
-      this.generateAuthUrl();
+      this.generateAuthUrl().catch(error => {
+        console.error(chalk.red('OAuth authorization URL generation failed:'), error.message);
+        if (this.server) this.server.close();
+      });
     });
   }
 
-  generateAuthUrl() {
-    const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath));
+  async generateAuthUrl() {
+    assertYouTubeComplianceGate('Legacy OAuth authorization URL generation');
+    const credentials = await this.loadCredentials();
     
     const oauth2Client = new google.auth.OAuth2(
       credentials.youtube.client_id,
@@ -120,13 +132,7 @@ class OAuthServer {
       credentials.youtube.redirect_uris[0]
     );
 
-    const scopes = [
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube',
-      'https://www.googleapis.com/auth/youtube.readonly',
-      'https://www.googleapis.com/auth/yt-analytics.readonly',
-      'https://www.googleapis.com/auth/youtube.force-ssl'
-    ];
+    const scopes = YOUTUBE_OAUTH_SCOPES;
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',

@@ -4,18 +4,67 @@ const fsSync = require('fs');
 const path = require('path');
 const { Logger } = require('../utils/logger');
 const { assertValidYouTubeMetadata } = require('../utils/youtube-metadata-validator');
+const { getYouTubeComplianceState, assertYouTubeComplianceGate, assertMadeForKidsDeclaration } = require('../utils/youtube-compliance-gate');
+const { requireWriteActionConsent, hashWritePayload } = require('../utils/youtube-write-action-consent');
+const { verifyMediaSourceProvenance } = require('../utils/media-source-provenance');
+const { assertChannelBoundWorkspaceRuntime } = require('../utils/workspace-runtime');
 
 class PublishingSchedulingAgent {
-  constructor(db, credentials) {
+  constructor(db, credentials, options = {}) {
     this.db = db;
     this.credentials = credentials;
     this.logger = new Logger('PublishingScheduling');
     this.youtube = null;
     this.publishQueue = [];
+    this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    this.getWriteActionConsent = options.getWriteActionConsent || null;
+    this.consumeWriteActionConsent = options.consumeWriteActionConsent || null;
+    this.getAuthorizingUserId = options.getAuthorizingUserId || null;
+    this.apiClientId = options.apiClientId || this.getYouTubeComplianceState().config?.apiClient?.id || null;
+    this.channelId = options.channelId || process.env.YOUTUBE_CHANNEL_ID || process.env.AIOS_YOUTUBE_CHANNEL_ID || null;
+    this.complianceBlocked = false;
+  }
+
+  assertChannelBinding() {
+    const runtime = assertChannelBoundWorkspaceRuntime();
+    if (this.channelId !== runtime.channelId) {
+      const error = new Error('The publishing agent channel ID must match the exact channel bound to this isolated workspace account');
+      error.status = 403;
+      error.code = 'YOUTUBE_CHANNEL_BINDING_MISMATCH';
+      throw error;
+    }
+    return runtime;
+  }
+
+  async requireWriteActionConsent(apiAction, capability, resourceScope, payload, visibility = null) {
+    this.assertChannelBinding();
+    const authorizingUserId = typeof this.getAuthorizingUserId === 'function'
+      ? await this.getAuthorizingUserId()
+      : null;
+    return requireWriteActionConsent({
+      getConsent: this.getWriteActionConsent,
+      consumeConsent: this.consumeWriteActionConsent,
+      apiClientId: this.apiClientId,
+      channelId: this.channelId,
+      apiAction,
+      capability,
+      resourceScope,
+      authorizingUserId,
+      payload,
+      visibility
+    });
   }
 
   async initialize() {
     this.logger.info('Initializing Publishing & Scheduling Agent...');
+    const gate = this.getYouTubeComplianceState();
+    if (!gate.allowed) {
+      this.complianceBlocked = true;
+      this.logger.warn('YouTube publishing remains disabled by the API Client compliance gate: ' + gate.blockers.join('; '));
+      await this.loadPublishQueue();
+      return true;
+    }
     await this.setupYouTubeAPI();
     await this.loadPublishQueue();
     return true;
@@ -23,6 +72,8 @@ class PublishingSchedulingAgent {
 
   async setupYouTubeAPI() {
     try {
+      this.assertYouTubeComplianceGate('YouTube API initialization');
+      this.assertChannelBinding();
       const auth = this.credentials.getYouTubeAuth();
       this.youtube = google.youtube({ version: 'v3', auth });
       this.logger.info('YouTube API initialized');
@@ -44,6 +95,7 @@ class PublishingSchedulingAgent {
 
   async scheduleContent(productionData) {
     try {
+      this.assertYouTubeComplianceGate('YouTube scheduling');
       const finalVideo = productionData.assets?.finalVideo;
       if (!finalVideo || finalVideo.simulated || path.extname(finalVideo.path || '').toLowerCase() !== '.mp4') {
         this.logger.warn(`Not scheduling ${productionData.id}: no real video file was produced (placeholder/simulated output). Fix your AI provider keys and FFmpeg, then regenerate.`);
@@ -53,10 +105,13 @@ class PublishingSchedulingAgent {
         this.logger.warn(`Not scheduling ${productionData.id}: narration is missing. Regenerate narration or explicitly confirm an intentional silent video.`);
         return null;
       }
+      const selfDeclaredMadeForKids = assertMadeForKidsDeclaration(productionData.selfDeclaredMadeForKids);
 
       this.logger.info(`Scheduling content: ${productionData.id}`);
       const existing = await this.db.getLatestScheduleEntry?.(productionData.id);
       if (existing) {
+        existing.metadata = { ...(existing.metadata || {}), selfDeclaredMadeForKids };
+        if (this.db.updateScheduleEntry) await this.db.updateScheduleEntry(existing);
         if (['scheduled', 'paused'].includes(existing.status) && !this.publishQueue.some(entry => entry.id === existing.id)) {
           this.publishQueue.push(existing);
           this.publishQueue.sort((a, b) => new Date(a.publishTime) - new Date(b.publishTime));
@@ -75,10 +130,12 @@ class PublishingSchedulingAgent {
           seo: productionData.seo,
           thumbnail: productionData.assets.thumbnail,
           video: productionData.assets.finalVideo,
+          mediaProvenance: productionData.assets.finalVideo.mediaProvenance || null,
           audio: productionData.assets.audio,
           captions: productionData.assets.captions,
           privacyStatus: productionData.privacyStatus || process.env.DEFAULT_PRIVACY_STATUS || 'private',
           containsSyntheticMedia: productionData.containsSyntheticMedia === true,
+          selfDeclaredMadeForKids,
           contentType: productionData.contentType || 'long_form',
           sourceProductionId: productionData.sourceProductionId || productionData.id,
           shortClipId: productionData.shortClipId || null
@@ -100,6 +157,7 @@ class PublishingSchedulingAgent {
 
   async publishContent(contentId) {
     try {
+      this.assertYouTubeComplianceGate('YouTube publishing');
       let productionBundle = null;
       if (this.db.getLatestReadinessRun) {
         const readiness = await this.db.getLatestReadinessRun();
@@ -135,6 +193,7 @@ class PublishingSchedulingAgent {
         throw new Error(`Content not found in queue: ${contentId}`);
       }
       if (scheduleEntry.status === 'published') return scheduleEntry;
+      assertMadeForKidsDeclaration(scheduleEntry.metadata?.selfDeclaredMadeForKids);
       if (!await this.isNarrationReady(scheduleEntry.metadata?.audio || productionBundle?.assets?.audio)) {
         const error = new Error('Publishing is blocked because narration is missing or the intentional-silence override is incomplete');
         error.status = 409;
@@ -167,6 +226,11 @@ class PublishingSchedulingAgent {
           await this.syncShortStatus(scheduleEntry, 'reconciliation_required', scheduleEntry.error);
           error.code = 'UPLOAD_OUTCOME_UNKNOWN';
           error.status = 409;
+        } else if (error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) {
+          scheduleEntry.status = 'scheduled';
+          scheduleEntry.error = 'Waiting for fresh, explicit, single-action user consent';
+          await this.db.updateScheduleEntry(scheduleEntry);
+          await this.syncShortStatus(scheduleEntry, 'scheduled', scheduleEntry.error);
         } else {
           scheduleEntry.status = 'failed';
           scheduleEntry.error = error.message;
@@ -197,7 +261,10 @@ class PublishingSchedulingAgent {
   }
 
   async uploadToYouTube(scheduleEntry) {
+    this.assertYouTubeComplianceGate('YouTube video upload');
+    this.assertChannelBinding();
     const { metadata } = scheduleEntry;
+    const selfDeclaredMadeForKids = assertMadeForKidsDeclaration(metadata.selfDeclaredMadeForKids);
     const validation = assertValidYouTubeMetadata(metadata.seo);
     if (validation.warnings.length) {
       this.logger.warn(`YouTube metadata warnings: ${validation.warnings.join(' ')}`);
@@ -217,13 +284,33 @@ class PublishingSchedulingAgent {
       status: {
         privacyStatus: metadata.privacyStatus || process.env.DEFAULT_PRIVACY_STATUS || 'private',
         publishAt: scheduleEntry.publishTime,
-        selfDeclaredMadeForKids: false,
+        selfDeclaredMadeForKids,
         containsSyntheticMedia: metadata.containsSyntheticMedia === true
       }
     };
     
-    // Resolve the file before marking the network upload as attempted.
+    const mediaCheck = await verifyMediaSourceProvenance(metadata.video.mediaProvenance || metadata.mediaProvenance, metadata.video.path);
+    if (!mediaCheck.valid) {
+      const error = new Error('YouTube upload is blocked until the exact source media, license/permission, and file hash are verified: ' + mediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
+      throw error;
+    }
+    // Prepare and validate the original local source stream before consuming the one-use consent.
     const videoStream = await this.getVideoStream(metadata.video.path);
+    try {
+      await this.requireWriteActionConsent(
+        'videos.insert',
+        'youtube.publish',
+        this.channelId + ':new-video',
+        { videoMetadata, mediaSha256: mediaCheck.sha256 },
+        videoMetadata.status.privacyStatus
+      );
+    } catch (error) {
+      if (typeof videoStream.destroy === 'function') videoStream.destroy();
+      throw error;
+    }
+    // The atomic single-use consent was consumed immediately above; dispatch is the next operation.
     scheduleEntry.uploadAttempted = true;
     const videoUpload = await this.youtube.videos.insert({
       part: 'snippet,status',
@@ -241,14 +328,28 @@ class PublishingSchedulingAgent {
     scheduleEntry.error = null;
     await this.db.updateScheduleEntry(scheduleEntry);
     
-    // Upload thumbnail
+    // Thumbnail and captions are separate YouTube write actions; never inherit video-upload consent.
     if (metadata.thumbnail && metadata.thumbnail.path) {
-      await this.uploadThumbnail(videoId, metadata.thumbnail.path);
+      try {
+        await this.uploadThumbnail(videoId, metadata.thumbnail.path, metadata.thumbnail.mediaProvenance);
+      } catch (error) {
+        if ((error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) || error.code === 'MEDIA_SOURCE_PROVENANCE_BLOCKED') {
+          this.logger.warn('Thumbnail upload skipped because separate user consent or media provenance is missing');
+        } else {
+          throw error;
+        }
+      }
     }
-    
-    // Upload captions
     if (metadata.captions && metadata.captions.path) {
-      await this.uploadCaptions(videoId, metadata.captions.path);
+      try {
+        await this.uploadCaptions(videoId, metadata.captions.path);
+      } catch (error) {
+        if (error.code && error.code.startsWith('YOUTUBE_WRITE_ACTION_CONSENT')) {
+          this.logger.warn('Captions upload skipped because separate user consent is missing');
+        } else {
+          throw error;
+        }
+      }
     }
     
     return videoUpload.data;
@@ -273,6 +374,8 @@ class PublishingSchedulingAgent {
   }
 
   async reconcileUploadedVideo(scheduleEntry) {
+    this.assertYouTubeComplianceGate('YouTube upload reconciliation');
+    this.assertChannelBinding();
     const response = await this.youtube.videos.list({ part: 'id,status', id: scheduleEntry.youtubeId });
     if (!response.data.items?.some(video => video.id === scheduleEntry.youtubeId)) {
       scheduleEntry.status = 'reconciliation_required';
@@ -319,29 +422,44 @@ class PublishingSchedulingAgent {
       throw new Error('video file not found — refusing to upload placeholder');
     }
   }
-  async uploadThumbnail(videoId, thumbnailPath) {
-    try {
-      const thumbnailBuffer = await fs.readFile(thumbnailPath);
-      
-      await this.youtube.thumbnails.set({
-        videoId: videoId,
-        media: {
-          body: thumbnailBuffer
-        }
-      });
-      
-      this.logger.info(`Thumbnail uploaded for video: ${videoId}`);
-    } catch (error) {
-      this.logger.error(`Failed to upload thumbnail: ${error.message}`);
+  async uploadThumbnail(videoId, thumbnailPath, mediaProvenance) {
+    this.assertYouTubeComplianceGate('YouTube thumbnail upload');
+    const mediaCheck = await verifyMediaSourceProvenance(mediaProvenance, thumbnailPath);
+    if (!mediaCheck.valid) {
+      const error = new Error('Thumbnail upload is blocked until source rights/provenance and file hash are verified: ' + mediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
+      throw error;
     }
+    const thumbnailBuffer = await fs.readFile(thumbnailPath);
+    await this.requireWriteActionConsent(
+      'thumbnails.set',
+      'youtube.thumbnail.upload',
+      this.channelId + ':video:' + videoId + ':thumbnail',
+      { videoId, mediaSha256: mediaCheck.sha256 },
+      null
+    );
+    await this.youtube.thumbnails.set({
+      videoId,
+      media: { body: thumbnailBuffer }
+    });
+    this.logger.info(`Thumbnail uploaded for video: ${videoId}`);
   }
 
-  async applyVideoPackaging(videoId, packaging = {}, previousPackaging = null) {
+  async applyVideoPackaging(videoId, packaging = {}) {
+    this.assertYouTubeComplianceGate('YouTube video packaging update');
     const title = String(packaging.title || '').trim();
     if (!videoId || !title || title.length > 100 || !packaging.thumbnailPath) {
       const error = new Error('A valid video ID, title, and thumbnail are required for a packaging change');
       error.status = 400;
       error.code = 'PACKAGING_INVALID';
+      throw error;
+    }
+    const mediaCheck = await verifyMediaSourceProvenance(packaging.thumbnailMediaProvenance, packaging.thumbnailPath);
+    if (!mediaCheck.valid) {
+      const error = new Error('Packaging update is blocked until thumbnail source rights/provenance and file hash are verified: ' + mediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
       throw error;
     }
     const thumbnail = await fs.readFile(packaging.thumbnailPath);
@@ -353,66 +471,78 @@ class PublishingSchedulingAgent {
       error.code = 'PACKAGING_VIDEO_NOT_FOUND';
       throw error;
     }
-
-    const updateTitle = async nextTitle => this.youtube.videos.update({
-      part: 'snippet',
-      requestBody: {
-        id: videoId,
-        snippet: {
-          title: nextTitle,
-          description: snippet.description || '',
-          tags: snippet.tags || [],
-          categoryId: snippet.categoryId || '22',
-          defaultLanguage: snippet.defaultLanguage,
-          defaultAudioLanguage: snippet.defaultAudioLanguage
-        }
+    const requestBody = {
+      id: videoId,
+      snippet: {
+        title,
+        description: snippet.description || '',
+        tags: snippet.tags || [],
+        categoryId: snippet.categoryId || '22',
+        defaultLanguage: snippet.defaultLanguage,
+        defaultAudioLanguage: snippet.defaultAudioLanguage
       }
-    });
-
-    await updateTitle(title);
+    };
+    await this.requireWriteActionConsent(
+      'videos.update',
+      'youtube.schedule',
+      this.channelId + ':video:' + videoId,
+      { part: 'snippet', requestBody },
+      null
+    );
+    await this.youtube.videos.update({ part: 'snippet', requestBody });
     try {
-      await this.youtube.thumbnails.set({
-        videoId,
-        media: { body: thumbnail }
-      });
+      await this.requireWriteActionConsent(
+        'thumbnails.set',
+        'youtube.thumbnail.upload',
+        this.channelId + ':video:' + videoId + ':thumbnail',
+        { videoId, mediaSha256: mediaCheck.sha256 },
+        null
+      );
+      await this.youtube.thumbnails.set({ videoId, media: { body: thumbnail } });
     } catch (error) {
-      try {
-        await updateTitle(String(previousPackaging?.title || snippet.title || '').trim());
-      } catch (rollbackError) {
-        error.message = `${error.message}; title rollback also failed: ${rollbackError.message}`;
-      }
+      error.status = error.status || 502;
+      error.code = 'PACKAGING_PARTIAL_UPDATE';
+      error.message = 'The title update was approved and applied, but the separately approved thumbnail update failed: ' + error.message;
       throw error;
     }
-    this.logger.info(`Applied approved growth-experiment packaging to video: ${videoId}`);
+    this.logger.info(`Applied separately approved packaging actions to video: ${videoId}`);
     return { videoId, title, thumbnailPath: packaging.thumbnailPath };
   }
 
   async uploadCaptions(videoId, captionsPath) {
-    try {
-      const captionsContent = await fs.readFile(captionsPath, 'utf8');
-      
-      await this.youtube.captions.insert({
-        part: 'snippet',
-        requestBody: {
-          snippet: {
-            videoId: videoId,
-            language: 'en',
-            name: 'English Captions',
-            isDraft: false
-          }
-        },
-        media: {
-          body: captionsContent
-        }
-      });
-      
-      this.logger.info(`Captions uploaded for video: ${videoId}`);
-    } catch (error) {
-      this.logger.error(`Failed to upload captions: ${error.message}`);
-    }
+    this.assertYouTubeComplianceGate('YouTube captions upload');
+    const captionsContent = await fs.readFile(captionsPath, 'utf8');
+    const requestBody = {
+      snippet: {
+        videoId,
+        language: 'en',
+        name: 'English Captions',
+        isDraft: false
+      }
+    };
+    await this.requireWriteActionConsent(
+      'captions.insert',
+      'youtube.captions.upload',
+      this.channelId + ':video:' + videoId + ':captions',
+      { requestBody, captionsPayloadHash: hashWritePayload(captionsContent) },
+      null
+    );
+    await this.youtube.captions.insert({
+      part: 'snippet',
+      requestBody,
+      media: { body: captionsContent }
+    });
+    this.logger.info(`Captions uploaded for video: ${videoId}`);
   }
 
   async processPublishQueue() {
+    const gate = this.getYouTubeComplianceState();
+    if (!gate.allowed) {
+      this.complianceBlocked = true;
+      this.logger.warn('Publish queue remains paused; no YouTube write actions will run until compliance approval.');
+      return 0;
+    }
+    this.complianceBlocked = false;
     const now = new Date();
     const scheduled = this.publishQueue
       .filter(entry => entry.status === 'scheduled')
@@ -485,6 +615,7 @@ class PublishingSchedulingAgent {
   }
 
   async getChannelAnalytics() {
+    this.assertYouTubeComplianceGate('YouTube channel statistics API Data access');
     try {
       // Get channel analytics for the last 30 days
       const response = await this.youtube.channels.list({

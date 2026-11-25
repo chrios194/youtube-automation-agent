@@ -19,7 +19,7 @@ class YouTubeAutomationSetup {
     console.log(chalk.cyan.bold('\n🎬 YouTube Automation Agent Setup'));
     console.log(chalk.gray('═'.repeat(60)));
     console.log(chalk.cyan('Welcome to the YouTube Automation Agent setup wizard!'));
-    console.log(chalk.gray('This will configure your system for fully automated YouTube content creation.\n'));
+    console.log(chalk.gray('This configures local content creation and workflow tools. YouTube API access and publishing remain disabled until the compliance gate is approved.\n'));
 
     const { mode } = await inquirer.prompt([{
       type: 'list',
@@ -62,10 +62,10 @@ class YouTubeAutomationSetup {
       console.log(chalk.cyan('\n📋 Next steps:'));
       console.log(chalk.white('1. Run: npm start'));
       console.log(chalk.white('2. Visit: http://localhost:3456'));
-      console.log(chalk.white('3. Your first video will be generated and scheduled within 24 hours'));
+      console.log(chalk.white('3. Local drafts can be generated; YouTube scheduling and publishing remain disabled until compliance approval.'));
       
       console.log(chalk.gray('\n═'.repeat(60)));
-      console.log(chalk.yellow('🤖 Your YouTube channel is now fully automated!'));
+      console.log(chalk.yellow('🤖 Local workflow setup is complete; YouTube publishing remains compliance-gated.'));
 
     } catch (error) {
       console.log(chalk.red.bold('\n❌ Setup failed!'));
@@ -154,7 +154,7 @@ RETRY_DELAY=5000
 
 # Automation Settings
 DAILY_CONTENT_ENABLED=true
-AUTO_PUBLISH_ENABLED=true
+AUTO_PUBLISH_ENABLED=false
 OPTIMIZATION_ENABLED=true
 CONTENT_BUFFER_DAYS=3
 MAX_DAILY_POSTS=1

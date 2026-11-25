@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { runFFmpeg } = require('./ffmpeg');
 const { Logger } = require('./logger');
+const { validateMediaSourceProvenance, verifyMediaSourceProvenance, hashFile } = require('./media-source-provenance');
 
 const LAYOUTS = new Set(['blur', 'crop', 'stacked']);
 
@@ -156,6 +157,14 @@ class ShortsRepurposingService {
       if (!['private', 'unlisted', 'public'].includes(input.privacyStatus)) throw new Error('Short privacy is invalid');
       changes.privacyStatus = input.privacyStatus;
     }
+    if (input.selfDeclaredMadeForKids !== undefined) {
+      if (input.selfDeclaredMadeForKids === null) {
+        changes.selfDeclaredMadeForKids = null;
+      } else {
+        if (typeof input.selfDeclaredMadeForKids !== 'boolean') throw new Error('Short Made for Kids declaration must be an explicit boolean');
+        changes.selfDeclaredMadeForKids = input.selfDeclaredMadeForKids;
+      }
+    }
     if (clip.status === 'rendered' && Object.keys(changes).some(key => ['layout'].includes(key))) {
       changes.status = 'proposed';
       changes.outputPath = null;
@@ -174,6 +183,14 @@ class ShortsRepurposingService {
     }
     const sourceVideo = bundle.assets?.finalVideo?.path;
     await this.requireFile(sourceVideo, 'The approved source MP4 is missing');
+    const sourceMediaProvenance = bundle.assets?.finalVideo?.mediaProvenance;
+    const sourceMediaCheck = await verifyMediaSourceProvenance(sourceMediaProvenance, sourceVideo);
+    if (!sourceMediaCheck.valid) {
+      const error = new Error('Short rendering is blocked until source media rights/provenance and the exact file hash are verified: ' + sourceMediaCheck.blockers.join('; '));
+      error.status = 409;
+      error.code = 'MEDIA_SOURCE_PROVENANCE_BLOCKED';
+      throw error;
+    }
     const sourceScenes = (bundle.scenes || []).filter(scene => clip.sourceSceneIds.includes(scene.id));
     if (!sourceScenes.length) throw new Error('The selected source scenes no longer exist');
 
@@ -195,8 +212,22 @@ class ShortsRepurposingService {
       await this.runFFmpeg(['-v', 'error', '-i', outputPath, '-f', 'null', '-']);
       const stats = await fs.stat(outputPath);
       if (!stats.isFile() || stats.size <= 0) throw new Error('FFmpeg returned an empty Short');
+      const outputSha256 = await hashFile(outputPath);
+      const derivedMediaProvenance = {
+        ...sourceMediaProvenance,
+        sha256: outputSha256,
+        sourceSha256: sourceMediaCheck.sha256,
+        derivedFromSourceRef: sourceMediaProvenance.sourceRef,
+        derivationRef: 'short:' + clip.id,
+        transformation: 'shorts-reframe',
+        createdAt: new Date().toISOString()
+      };
+      const inheritedEvidence = {
+        ...(clip.inheritedEvidence || {}),
+        mediaProvenance: derivedMediaProvenance
+      };
       return this.db.updateShortClip(clip.id, {
-        status: 'rendered', outputPath, captionsPath, error: null,
+        status: 'rendered', outputPath, captionsPath, inheritedEvidence, error: null,
         renderedAt: new Date().toISOString()
       });
     } catch (error) {
@@ -274,6 +305,15 @@ class ShortsRepurposingService {
     if (Number.isNaN(publishTime.getTime())) throw new Error('Choose a valid Short publish time');
     const privacyStatus = input.privacyStatus || clip.privacyStatus || 'private';
     if (!['private', 'unlisted', 'public'].includes(privacyStatus)) throw new Error('Short privacy is invalid');
+    const selfDeclaredMadeForKids = input.selfDeclaredMadeForKids !== undefined && input.selfDeclaredMadeForKids !== null
+      ? input.selfDeclaredMadeForKids
+      : clip.selfDeclaredMadeForKids;
+    if (typeof selfDeclaredMadeForKids !== 'boolean') {
+      const error = new Error('Select whether this individual Short is Made for Kids before approval');
+      error.status = 409;
+      error.code = 'MADE_FOR_KIDS_DECLARATION_REQUIRED';
+      throw error;
+    }
     const parentUrl = bundle.schedule?.youtube_url || bundle.schedule?.youtubeUrl;
     const description = parentUrl && !clip.description.includes(parentUrl)
       ? `${clip.description}\n\nWatch the full video: ${parentUrl}`.slice(0, 5000)
@@ -288,7 +328,7 @@ class ShortsRepurposingService {
         tags: [...new Set([...(clip.tags || []), 'Shorts'])]
       },
       assets: {
-        finalVideo: { path: clip.outputPath, simulated: false, aspectRatio: '9:16', duration: clip.duration },
+        finalVideo: { path: clip.outputPath, simulated: false, aspectRatio: '9:16', duration: clip.duration, mediaProvenance: clip.inheritedEvidence?.mediaProvenance || null },
         audio,
         captions: clip.captionsPath ? { path: clip.captionsPath } : null,
         thumbnail: null
@@ -296,6 +336,7 @@ class ShortsRepurposingService {
       scheduledPublishTime: publishTime.toISOString(),
       priority: 60,
       privacyStatus,
+      selfDeclaredMadeForKids,
       containsSyntheticMedia: evidence.containsSyntheticMedia,
       contentType: 'short',
       sourceProductionId: productionId,
@@ -307,7 +348,7 @@ class ShortsRepurposingService {
       throw error;
     }
     return this.db.updateShortClip(clip.id, {
-      status: 'scheduled', publishTime: publishTime.toISOString(), privacyStatus,
+      status: 'scheduled', publishTime: publishTime.toISOString(), privacyStatus, selfDeclaredMadeForKids,
       inheritedEvidence: evidence, approvedAt: new Date().toISOString(), scheduleId: schedule.id,
       error: null
     });
@@ -316,7 +357,10 @@ class ShortsRepurposingService {
   inheritedEvidence(bundle) {
     const blockingReasons = [];
     if (bundle.review_status !== 'approved') blockingReasons.push('source approval');
-    if (!['verified', 'not_required'].includes(bundle.provenance?.status || 'not_required')) blockingReasons.push('provenance review');
+    if (!['verified', 'not_required'].includes(bundle.provenance?.status || 'not_required')) blockingReasons.push('factual-claim provenance review');
+    const mediaProvenance = bundle.assets?.finalVideo?.mediaProvenance || null;
+    const mediaProvenanceBlockers = validateMediaSourceProvenance(mediaProvenance);
+    if (mediaProvenanceBlockers.length) blockingReasons.push('media source rights/provenance');
     const unlicensed = (bundle.scenes || []).filter(scene => scene.assetOrigin === 'uploaded' && !scene.rightsConfirmed);
     if (unlicensed.length) blockingReasons.push('media rights');
     const stale = (bundle.scenes || []).filter(scene =>
@@ -328,6 +372,8 @@ class ShortsRepurposingService {
       blockingReasons,
       sourceReviewStatus: bundle.review_status || 'needs_review',
       provenanceStatus: bundle.provenance?.status || 'not_required',
+      mediaProvenance,
+      mediaProvenanceVerified: mediaProvenanceBlockers.length === 0,
       rightsConfirmed: unlicensed.length === 0,
       containsSyntheticMedia: bundle.provenance?.containsSyntheticMedia === true,
       capturedAt: new Date().toISOString()

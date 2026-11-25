@@ -5,8 +5,10 @@ const inquirer = require('inquirer');
 const chalk = require('chalk');
 const { Logger } = require('./logger');
 const { PROVIDERS, GEMINI_MODELS, GEMINI_DEFAULT_MODEL } = require('./ai-text-service');
-const { getWorkspaceRuntime } = require('./workspace-runtime');
-const { readSecretFile, writeSecretFile } = require('./secret-store');
+const { getWorkspaceRuntime, assertChannelBoundWorkspaceRuntime } = require('./workspace-runtime');
+const { readSecretFile, writeSecretFile, readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('./secret-store');
+const { YOUTUBE_OAUTH_SCOPES } = require('./youtube-oauth-scopes');
+const { getYouTubeComplianceState, assertYouTubeComplianceGate } = require('./youtube-compliance-gate');
 
 class CredentialManager {
   constructor(options = {}) {
@@ -17,8 +19,10 @@ class CredentialManager {
     this.credentials = {};
     this.tokens = {};
     this.masterKey = options.masterKey || process.env.AGENTTUBE_MASTER_KEY || null;
-    if (this.runtime.strictMode && !this.masterKey) {
-      throw new Error('Workspace strict mode requires AGENTTUBE_MASTER_KEY (32+ characters) for encrypted credential storage');
+    this.getYouTubeComplianceState = options.getYouTubeComplianceState || getYouTubeComplianceState;
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    if (this.runtime.strictMode && (!this.masterKey || this.masterKey.length < 32)) {
+      throw new Error('Workspace strict mode requires AGENTTUBE_MASTER_KEY (at least 32 characters) for encrypted credential storage');
     }
   }
 
@@ -35,21 +39,30 @@ class CredentialManager {
 
   async loadCredentials() {
     try {
-      this.credentials = await readSecretFile(this.credentialsPath, this.masterKey);
+      this.credentials = this.runtime.enabled && this.runtime.strictMode
+        ? await readWorkspaceSecretFile(this.credentialsPath, this.runtime, this.masterKey)
+        : await readSecretFile(this.credentialsPath, this.masterKey);
     } catch (error) {
       this.credentials = {};
     }
   }
 
   async loadTokens() {
+    if (!this.runtime.enabled || !this.runtime.strictMode || !this.runtime.accountId) {
+      this.tokens = {};
+      return;
+    }
     try {
-      this.tokens = await readSecretFile(this.tokensPath, this.masterKey);
+      this.tokens = await readWorkspaceSecretFile(this.tokensPath, this.runtime, this.masterKey);
     } catch (error) {
       this.tokens = {};
     }
   }
 
   async saveCredentials() {
+    if (this.runtime.enabled && this.runtime.strictMode) {
+      return writeWorkspaceSecretFile(this.credentialsPath, this.credentials, this.runtime, this.masterKey);
+    }
     if (this.masterKey) return writeSecretFile(this.credentialsPath, this.credentials, this.masterKey);
     await fs.mkdir(path.dirname(this.credentialsPath), { recursive: true, mode: 0o700 });
     await fs.writeFile(this.credentialsPath, JSON.stringify(this.credentials, null, 2), { mode: 0o600 });
@@ -57,17 +70,15 @@ class CredentialManager {
   }
 
   async saveTokens() {
-    if (this.masterKey) return writeSecretFile(this.tokensPath, this.tokens, this.masterKey);
-    await fs.mkdir(path.dirname(this.tokensPath), { recursive: true, mode: 0o700 });
-    await fs.writeFile(this.tokensPath, JSON.stringify(this.tokens, null, 2), { mode: 0o600 });
-    await fs.chmod(this.tokensPath, 0o600);
+    return writeWorkspaceSecretFile(this.tokensPath, this.tokens, this.runtime, this.masterKey);
   }
 
   // YouTube API Authentication
   async setupYouTubeCredentials() {
+    assertChannelBoundWorkspaceRuntime(this.runtime);
+    const gate = this.assertYouTubeComplianceGate('YouTube OAuth credential provisioning');
     console.log(chalk.cyan('\n🎬 YouTube API Setup'));
-    console.log(chalk.gray('You need to create a YouTube Data API project in Google Cloud Console'));
-    console.log(chalk.gray('Visit: https://console.cloud.google.com/'));
+    console.log(chalk.gray('The approved AgentTube API Project and OAuth client must match the compliance record.'));
     
     const answers = await inquirer.prompt([
       {
@@ -90,6 +101,13 @@ class CredentialManager {
       }
     ]);
 
+    if (answers.clientId !== gate.config?.apiProject?.oauthClientId) {
+      const error = new Error('OAuth client ID does not match the single API Project approved for this AgentTube API Client');
+      error.status = 409;
+      error.code = 'YOUTUBE_API_CLIENT_ID_MISMATCH';
+      throw error;
+    }
+
     this.credentials.youtube = {
       client_id: answers.clientId,
       client_secret: answers.clientSecret,
@@ -105,19 +123,15 @@ class CredentialManager {
   }
 
   async authenticateYouTube() {
+    assertChannelBoundWorkspaceRuntime(this.runtime);
+    this.assertYouTubeComplianceGate('YouTube OAuth authorization');
     const oauth2Client = new google.auth.OAuth2(
       this.credentials.youtube.client_id,
       this.credentials.youtube.client_secret,
       this.credentials.youtube.redirect_uris[0]
     );
 
-    const scopes = [
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube',
-      'https://www.googleapis.com/auth/youtube.readonly',
-      'https://www.googleapis.com/auth/yt-analytics.readonly',
-      'https://www.googleapis.com/auth/youtube.force-ssl'
-    ];
+    const scopes = YOUTUBE_OAUTH_SCOPES;
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
@@ -146,6 +160,14 @@ class CredentialManager {
   }
 
   getYouTubeAuth() {
+    assertChannelBoundWorkspaceRuntime(this.runtime);
+    const gate = this.assertYouTubeComplianceGate('YouTube API access');
+    if (gate.config?.apiProject?.oauthClientId && this.credentials.youtube?.client_id !== gate.config.apiProject.oauthClientId) {
+      const error = new Error('Stored OAuth client ID does not match the single API Project approved for this AgentTube API Client');
+      error.status = 409;
+      error.code = 'YOUTUBE_API_CLIENT_ID_MISMATCH';
+      throw error;
+    }
     if (!this.credentials.youtube || !this.tokens.youtube) {
       throw new Error('YouTube credentials not configured');
     }
@@ -534,7 +556,7 @@ class CredentialManager {
   getMissingCredentials() {
     const missing = [];
 
-    if (!this.credentials.youtube) {
+    if (this.getYouTubeComplianceState().allowed && !this.credentials.youtube) {
       missing.push('youtube');
     }
 
@@ -561,8 +583,8 @@ class CredentialManager {
       return false;
     }
 
-    // Validate YouTube tokens
-    if (!this.tokens.youtube) {
+    // YouTube authorization is not a startup prerequisite while the compliance gate is closed.
+    if (this.getYouTubeComplianceState().allowed && !this.tokens.youtube) {
       console.log(chalk.yellow('\n⚠️  YouTube authentication required'));
       return false;
     }
@@ -579,18 +601,22 @@ class CredentialManager {
       azureSpeech: false
     };
 
-    // Test YouTube API
-    try {
-      const youtube = this.getYouTubeClient();
-      await youtube.channels.list({
-        part: 'snippet',
-        mine: true
-      });
-      results.youtube = true;
-      console.log(chalk.green('✅ YouTube API connection successful'));
-    } catch (error) {
-      console.log(chalk.red('❌ YouTube API connection failed'));
-      this.logger.error('YouTube API test failed:', error);
+    // Do not attempt YouTube API access while the product compliance gate is closed.
+    if (!this.getYouTubeComplianceState().allowed) {
+      console.log(chalk.yellow('⏸️  YouTube connection test skipped: API Client compliance gate is closed'));
+    } else {
+      try {
+        const youtube = this.getYouTubeClient();
+        await youtube.channels.list({
+          part: 'snippet',
+          mine: true
+        });
+        results.youtube = true;
+        console.log(chalk.green('✅ YouTube API connection successful'));
+      } catch (error) {
+        console.log(chalk.red('❌ YouTube API connection failed'));
+        this.logger.error('YouTube API test failed:', error);
+      }
     }
 
     // Test OpenAI API
@@ -616,13 +642,18 @@ class CredentialManager {
     console.log(chalk.cyan.bold('\n🚀 YouTube Automation Agent Setup Wizard'));
     console.log(chalk.gray('Let\'s configure your credentials and settings...\n'));
 
-    const setupSteps = [
-      { name: '🎬 YouTube API', action: () => this.setupYouTubeCredentials() },
+    const setupSteps = [];
+    if (this.getYouTubeComplianceState().allowed) {
+      setupSteps.push({ name: '🎬 YouTube API', action: () => this.setupYouTubeCredentials() });
+    } else {
+      console.log(chalk.yellow('⏸️  YouTube OAuth setup skipped until the API Client boundary, child-directed assessment, and required compliance review are approved.'));
+    }
+    setupSteps.push(
       { name: '🤖 AI Service (OpenAI/Gemini)', action: () => this.setupAIService() },
       { name: '🎙️  Text-to-Speech Service', action: () => this.setupTTSService() },
       { name: '📺 Channel Configuration', action: () => this.setupChannelConfig() },
       { name: '📝 Content Configuration', action: () => this.setupContentConfig() }
-    ];
+    );
 
     for (const step of setupSteps) {
       console.log(chalk.cyan(`\n${step.name}`));

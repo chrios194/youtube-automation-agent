@@ -6,6 +6,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { exec } = require('child_process');
 const { CredentialManager } = require('./utils/credential-manager');
+const { getYouTubeComplianceState } = require('./utils/youtube-compliance-gate');
 const {
   AITextService,
   PROVIDERS,
@@ -388,92 +389,49 @@ class SetupWalkthrough {
 
   // ── Step 4: YouTube ────────────────────────────────────────────────────
   async stepYouTube() {
-    this.header(4, 'Connecting your YouTube channel');
+    this.header(4, 'YouTube connection — compliance gated');
+
+    const compliance = getYouTubeComplianceState();
+    if (!compliance.allowed) {
+      console.log(chalk.yellow('\nYouTube authorization and publishing are disabled by the compliance gate.'));
+      for (const blocker of compliance.blockers) console.log(chalk.gray('  • ' + blocker));
+      console.log(chalk.white('\nDo not create a Google Cloud project, OAuth client, API key, or user authorization yet.'));
+      console.log(chalk.white('Local content generation and private draft preparation can continue without YouTube API access.'));
+      return;
+    }
 
     if (this.cm.credentials.youtube && this.cm.tokens.youtube) {
       const { redo } = await inquirer.prompt([{
         type: 'confirm',
         name: 'redo',
-        message: 'YouTube is already connected. Reconnect?',
+        message: 'The approved YouTube connection is already configured. Reconnect?',
         default: false
       }]);
       if (!redo) return;
-    } else {
-      console.log(chalk.white('This lets the agent upload to your channel. It\'s the fiddliest step,'));
-      console.log(chalk.white('but it\'s free and you only do it once. You can also skip it — videos'));
-      console.log(chalk.white('will still be generated locally in data/videos/.'));
     }
 
     const { action } = await inquirer.prompt([{
       type: 'list',
       name: 'action',
-      message: 'How do you want to proceed?',
+      message: 'Use the OAuth client already recorded in the approved exclusive API Project?',
       choices: [
-        { name: '🧭 Walk me through creating the Google credentials (~5 min)', value: 'guided' },
-        { name: '⚡ I already have a Client ID and Client Secret', value: 'have' },
-        { name: '⏭️  Skip for now', value: 'skip' }
+        { name: 'Connect using the already approved API Project and OAuth client', value: 'connect' },
+        { name: 'Skip for now', value: 'skip' }
       ]
     }]);
 
     if (action === 'skip') {
-      console.log(chalk.yellow('  Skipped — connect later with: npm run walkthrough'));
+      console.log(chalk.yellow('  Skipped — local draft generation remains available.'));
       return;
     }
-
-    if (action === 'guided') {
-      console.log(chalk.cyan('\nDo this in the browser tab that just opened:'));
-      console.log(chalk.white('  1. Create a project (any name) — top bar → "New project"'));
-      console.log(chalk.white('  2. Menu → "APIs & Services" → "Library" → search "YouTube Data API v3" → Enable'));
-      console.log(chalk.white('  3. "APIs & Services" → "OAuth consent screen" → External → fill the 3 required'));
-      console.log(chalk.white('     fields → add YOUR OWN email under "Test users"'));
-      console.log(chalk.white('  4. "APIs & Services" → "Credentials" → "Create credentials" → "OAuth client ID"'));
-      console.log(chalk.white('     → Application type: "Desktop app"'));
-      console.log(chalk.white('  5. Copy the Client ID and Client Secret it shows you'));
-      console.log(chalk.white(`  → ${chalk.blue('https://console.cloud.google.com/')}`));
-      this.openBrowser('https://console.cloud.google.com/');
-    }
-
-    const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'clientId',
-        message: 'Paste your Client ID (ends in .apps.googleusercontent.com, empty to skip):'
-      },
-      {
-        type: 'password',
-        name: 'clientSecret',
-        mask: '*',
-        message: 'Paste your Client Secret:',
-        when: (a) => a.clientId.trim().length > 0
-      }
-    ]);
-
-    if (!answers.clientId.trim()) {
-      console.log(chalk.yellow('  Skipped — connect later with: npm run walkthrough'));
-      return;
-    }
-
-    this.cm.credentials.youtube = {
-      client_id: answers.clientId.trim(),
-      client_secret: (answers.clientSecret || '').trim(),
-      redirect_uris: ['http://localhost:8080/oauth2callback']
-    };
-    await this.cm.saveCredentials();
-
-    console.log(chalk.cyan('\nNow let\'s sign in. A Google page will open — approve the access.'));
-    console.log(chalk.gray('(You may see "Google hasn\'t verified this app" — click "Continue".'));
-    console.log(chalk.gray(' That\'s expected: the "app" is your own Cloud project.)'));
 
     try {
-      const { ModernAuth } = require('./modern-auth');
-      const auth = new ModernAuth();
-      await auth.authenticate();
+      await this.cm.setupYouTubeCredentials();
       await this.cm.loadTokens();
-      console.log(chalk.gray('  Checking which channel this is...'));
-      await auth.testAuthentication();
+      console.log(chalk.green('  ✓ Approved YouTube connection configured.'));
     } catch (error) {
-      console.log(chalk.red(`  ✗ Sign-in failed: ${error.message}`));
-      console.log(chalk.yellow('  Your Client ID/Secret are saved — retry with: npm run walkthrough'));
+      console.log(chalk.red('  ✗ YouTube connection was not completed: ' + error.message));
+      console.log(chalk.yellow('  The compliance gate remains in force; no unapproved project or credential is accepted.'));
     }
   }
 
@@ -541,7 +499,8 @@ class SetupWalkthrough {
     const hasGemini = Boolean(creds.gemini?.apiKey || process.env.GEMINI_API_KEY);
     const hasMedia = Boolean(creds.openai?.apiKey || process.env.OPENAI_API_KEY || hasGemini);
     const hasFFmpeg = await checkFFmpeg();
-    const hasUpload = Boolean(creds.youtube && this.cm.tokens.youtube);
+    const compliance = getYouTubeComplianceState();
+    const hasUpload = compliance.allowed && Boolean(creds.youtube && this.cm.tokens.youtube);
     const videoProviders = new VideoProviderRegistry(creds).list();
     const hasVideoProvider = videoProviders.some(provider => provider.available && provider.id !== 'slideshow');
 

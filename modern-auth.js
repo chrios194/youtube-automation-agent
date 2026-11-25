@@ -1,23 +1,40 @@
 const { google } = require('googleapis');
-const fs = require('fs');
+const { readWorkspaceSecretFile, writeWorkspaceSecretFile } = require('./utils/secret-store');
 const path = require('path');
 const chalk = require('chalk');
 const http = require('http');
 const { URL } = require('url');
+const { assertYouTubeComplianceGate } = require('./utils/youtube-compliance-gate');
+const { YOUTUBE_OAUTH_SCOPES } = require('./utils/youtube-oauth-scopes');
+const { assertChannelBoundWorkspaceRuntime } = require('./utils/workspace-runtime');
 
 class ModernAuth {
   constructor() {
-    this.credentialsPath = path.join(__dirname, 'config', 'credentials.json');
-    this.tokensPath = path.join(__dirname, 'config', 'tokens.json');
+    this.runtime = assertChannelBoundWorkspaceRuntime();
+    this.credentialsPath = path.join(this.runtime.configDir, 'credentials.json');
+    this.tokensPath = path.join(this.runtime.configDir, 'tokens.json');
     this.server = null;
   }
 
+  async loadCredentials() {
+    return readWorkspaceSecretFile(this.credentialsPath, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
+  async loadTokens() {
+    return readWorkspaceSecretFile(this.tokensPath, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
+  async saveTokens(tokens) {
+    return writeWorkspaceSecretFile(this.tokensPath, { youtube: tokens }, this.runtime, process.env.AGENTTUBE_MASTER_KEY);
+  }
+
   async authenticate() {
+    assertYouTubeComplianceGate('Legacy modern OAuth authorization');
     console.log(chalk.cyan.bold('\n🔐 YouTube Authentication (Modern Flow)'));
     console.log(chalk.gray('═'.repeat(60)));
     
     try {
-      const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
+      const credentials = await this.loadCredentials();
       
       // Use a random high port to avoid conflicts
       const port = 8000 + Math.floor(Math.random() * 1000);
@@ -29,13 +46,7 @@ class ModernAuth {
         redirectUri
       );
 
-      const scopes = [
-        'https://www.googleapis.com/auth/youtube.upload',
-        'https://www.googleapis.com/auth/youtube',
-        'https://www.googleapis.com/auth/youtube.readonly',
-        'https://www.googleapis.com/auth/yt-analytics.readonly',
-        'https://www.googleapis.com/auth/youtube.force-ssl'
-      ];
+      const scopes = YOUTUBE_OAUTH_SCOPES;
 
       // Start a temporary local server
       await this.startTempServer(port, oauth2Client);
@@ -83,6 +94,7 @@ class ModernAuth {
   }
 
   async startTempServer(port, oauth2Client) {
+    assertYouTubeComplianceGate('Legacy modern OAuth callback server startup');
     this.server = http.createServer(async (req, res) => {
       const url = new URL(req.url, `http://localhost:${port}`);
       
@@ -103,11 +115,11 @@ class ModernAuth {
         
         if (code) {
           try {
+            assertYouTubeComplianceGate('Legacy modern OAuth callback token exchange');
             const { tokens } = await oauth2Client.getToken(code);
             
             // Save tokens
-            const tokenData = { youtube: tokens };
-            fs.writeFileSync(this.tokensPath, JSON.stringify(tokenData, null, 2));
+            await this.saveTokens(tokens);
             
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(`
@@ -160,9 +172,10 @@ class ModernAuth {
   }
 
   async testAuthentication() {
+    assertYouTubeComplianceGate('Legacy modern OAuth token validation');
     try {
-      const tokens = JSON.parse(fs.readFileSync(this.tokensPath));
-      const credentials = JSON.parse(fs.readFileSync(this.credentialsPath));
+      const tokens = await this.loadTokens();
+      const credentials = await this.loadCredentials();
       
       const oauth2Client = new google.auth.OAuth2(
         credentials.youtube.client_id,

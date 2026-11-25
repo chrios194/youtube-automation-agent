@@ -1,8 +1,9 @@
 const { Logger } = require('../utils/logger');
 const { AITextService } = require('../utils/ai-text-service');
+const { assertYouTubeComplianceGate, assertDerivedMetricsGate } = require('../utils/youtube-compliance-gate');
 
 class ContentStrategyAgent {
-  constructor(db, credentials) {
+  constructor(db, credentials, options = {}) {
     this.db = db;
     this.credentials = credentials;
     this.logger = new Logger('ContentStrategy');
@@ -10,6 +11,8 @@ class ContentStrategyAgent {
     this.competitorData = [];
     this.contentCalendar = [];
     this.aiTextService = new AITextService(credentials?.credentials || credentials || {});
+    this.assertYouTubeComplianceGate = options.assertYouTubeComplianceGate || assertYouTubeComplianceGate;
+    this.assertDerivedMetricsGate = options.assertDerivedMetricsGate || assertDerivedMetricsGate;
   }
 
   async initialize() {
@@ -21,6 +24,7 @@ class ContentStrategyAgent {
 
   async loadHistoricalData() {
     try {
+      this.assertDerivedMetricsGate('YouTube API Data-derived content strategy history');
       const history = await this.db.getContentHistory();
       this.historicalPerformance = history;
     } catch (error) {
@@ -48,6 +52,8 @@ class ContentStrategyAgent {
   }
 
   async fetchYouTubeTrends() {
+    this.assertYouTubeComplianceGate('YouTube trends API Data access');
+    this.assertDerivedMetricsGate('YouTube trend rankings and topic scores');
     // Use YouTube API to fetch trending videos
     const youtube = this.credentials.getYouTubeClient();
     
@@ -100,6 +106,8 @@ class ContentStrategyAgent {
   }
 
   async getChannelVideos(channelId) {
+    this.assertYouTubeComplianceGate('YouTube competitor video API Data access');
+    this.assertDerivedMetricsGate('YouTube competitor performance analysis');
     const youtube = this.credentials.getYouTubeClient();
     
     try {
@@ -126,6 +134,7 @@ class ContentStrategyAgent {
   }
 
   analyzeVideoPerformance(videos) {
+    this.assertDerivedMetricsGate('YouTube API Data-derived competitor scores and topic rankings');
     if (!videos || videos.length === 0) {
       return { topTopics: [], avgViews: 0, frequency: 0 };
     }
@@ -285,9 +294,15 @@ class ContentStrategyAgent {
     const recentRows = await this.db.getAllRows(
       "SELECT topic, created_at FROM content_strategies WHERE created_at >= datetime('now', '-90 days') ORDER BY created_at DESC LIMIT 50"
     );
-    const approvedLearnings = this.db.listLearningRecommendations
-      ? await this.db.listLearningRecommendations({ status: 'approved', limit: 10 })
-      : [];
+    let approvedLearnings = [];
+    try {
+      this.assertDerivedMetricsGate('YouTube API Data-derived channel learning in content strategy');
+      approvedLearnings = this.db.listLearningRecommendations
+        ? await this.db.listLearningRecommendations({ status: 'approved', limit: 10 })
+        : [];
+    } catch (error) {
+      this.logger.warn('YouTube API Data-derived learnings are excluded from planning until the Analytics & Reporting exception is approved');
+    }
     const signals = this.trendingTopics.slice(0, 15).map(item => ({
       topic: item.topic,
       score: Number(item.score || 0),
